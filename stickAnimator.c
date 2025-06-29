@@ -52,7 +52,8 @@ typedef struct {
     */
     list_t *animations;
     list_t *dotPositions;
-    list_t *limbTree;
+    list_t *limbParents;
+    list_t *limbChildren;
     int8_t keys[16];
 
     int8_t mode; // 0 - normal mode, 1 - editing mode
@@ -97,25 +98,43 @@ void init() {
     list_append(defaultStick, (unitype) 170.0, 'd'); // lower right leg
     list_append(self.sticks, (unitype) defaultStick, 'r');
     /* create limb tree */
-    self.limbTree = list_init();
+    self.limbParents = list_init();
     self.dotPositions = list_init();
+    self.limbChildren = list_init();
     for (int32_t i = 0; i < 64; i++) {
         list_append(self.dotPositions, (unitype) 0.0, 'd');
-        list_append(self.limbTree, (unitype) 0, 'i');
+        list_append(self.limbParents, (unitype) 0, 'i');
+        list_append(self.limbChildren, (unitype) list_init(), 'r');
     }
-    self.limbTree -> data[STICK_LOWER_BODY].i = 0;
-    self.limbTree -> data[STICK_UPPER_BODY].i = STICK_LOWER_BODY;
-    self.limbTree -> data[STICK_HEAD].i = STICK_UPPER_BODY;
-    self.limbTree -> data[STICK_LEFT_UPPER_ARM].i = STICK_UPPER_BODY;
-    self.limbTree -> data[STICK_RIGHT_UPPER_ARM].i = STICK_UPPER_BODY;
-    self.limbTree -> data[STICK_LEFT_LOWER_ARM].i = STICK_LEFT_UPPER_ARM;
-    self.limbTree -> data[STICK_RIGHT_LOWER_ARM].i = STICK_RIGHT_UPPER_ARM;
-    self.limbTree -> data[STICK_LEFT_UPPER_LEG].i = 0;
-    self.limbTree -> data[STICK_RIGHT_UPPER_LEG].i = 0;
-    self.limbTree -> data[STICK_LEFT_LOWER_LEG].i = STICK_LEFT_UPPER_LEG;
-    self.limbTree -> data[STICK_RIGHT_LOWER_LEG].i = STICK_RIGHT_UPPER_LEG;
+    self.limbParents -> data[STICK_LOWER_BODY].i = 0;
+    self.limbParents -> data[STICK_UPPER_BODY].i = STICK_LOWER_BODY;
+    self.limbParents -> data[STICK_HEAD].i = STICK_UPPER_BODY;
+    self.limbParents -> data[STICK_LEFT_UPPER_ARM].i = STICK_UPPER_BODY;
+    self.limbParents -> data[STICK_RIGHT_UPPER_ARM].i = STICK_UPPER_BODY;
+    self.limbParents -> data[STICK_LEFT_LOWER_ARM].i = STICK_LEFT_UPPER_ARM;
+    self.limbParents -> data[STICK_RIGHT_LOWER_ARM].i = STICK_RIGHT_UPPER_ARM;
+    self.limbParents -> data[STICK_LEFT_UPPER_LEG].i = 0;
+    self.limbParents -> data[STICK_RIGHT_UPPER_LEG].i = 0;
+    self.limbParents -> data[STICK_LEFT_LOWER_LEG].i = STICK_LEFT_UPPER_LEG;
+    self.limbParents -> data[STICK_RIGHT_LOWER_LEG].i = STICK_RIGHT_UPPER_LEG;
 
+    list_append(self.limbChildren -> data[STICK_LOWER_BODY].r, (unitype) STICK_UPPER_BODY, 'i');
+    list_append(self.limbChildren -> data[STICK_LOWER_BODY].r, (unitype) STICK_HEAD, 'i');
+    list_append(self.limbChildren -> data[STICK_LOWER_BODY].r, (unitype) STICK_LEFT_UPPER_ARM, 'i');
+    list_append(self.limbChildren -> data[STICK_LOWER_BODY].r, (unitype) STICK_RIGHT_UPPER_ARM, 'i');
+    list_append(self.limbChildren -> data[STICK_LOWER_BODY].r, (unitype) STICK_LEFT_LOWER_ARM, 'i');
+    list_append(self.limbChildren -> data[STICK_LOWER_BODY].r, (unitype) STICK_RIGHT_LOWER_ARM, 'i');
 
+    list_append(self.limbChildren -> data[STICK_UPPER_BODY].r, (unitype) STICK_HEAD, 'i');
+    list_append(self.limbChildren -> data[STICK_UPPER_BODY].r, (unitype) STICK_LEFT_UPPER_ARM, 'i');
+    list_append(self.limbChildren -> data[STICK_UPPER_BODY].r, (unitype) STICK_RIGHT_UPPER_ARM, 'i');
+    list_append(self.limbChildren -> data[STICK_UPPER_BODY].r, (unitype) STICK_LEFT_LOWER_ARM, 'i');
+    list_append(self.limbChildren -> data[STICK_UPPER_BODY].r, (unitype) STICK_RIGHT_LOWER_ARM, 'i');
+
+    list_append(self.limbChildren -> data[STICK_LEFT_UPPER_ARM].r, (unitype) STICK_LEFT_LOWER_ARM, 'i');
+    list_append(self.limbChildren -> data[STICK_RIGHT_UPPER_ARM].r, (unitype) STICK_RIGHT_LOWER_ARM, 'i');
+    list_append(self.limbChildren -> data[STICK_LEFT_UPPER_LEG].r, (unitype) STICK_LEFT_LOWER_LEG, 'i');
+    list_append(self.limbChildren -> data[STICK_RIGHT_UPPER_LEG].r, (unitype) STICK_RIGHT_LOWER_LEG, 'i');
 
     self.animations = list_init();
     self.mode = 0;
@@ -280,7 +299,6 @@ void renderGround() {
 }
 
 void editingMouseTick() {
-    // printf("%d\n", self.mouseHoverDot);
     if (turtleMouseDown()) {
         if (self.keys[0] == 0) {
             /* first tick */
@@ -293,9 +311,8 @@ void editingMouseTick() {
                     self.positionAnchorX = self.sticks -> data[self.mouseStickIndex].r -> data[0].d;
                     self.positionAnchorY = self.sticks -> data[self.mouseStickIndex].r -> data[1].d;
                 } else {
-                    printf("%d %d\n", self.mouseDraggingDot, self.limbTree -> data[self.mouseDraggingDot].i);
-                    self.positionAnchorX = self.dotPositions -> data[self.limbTree -> data[self.mouseDraggingDot].i * 2].d;
-                    self.positionAnchorY = self.dotPositions -> data[self.limbTree -> data[self.mouseDraggingDot].i * 2 + 1].d;
+                    self.positionAnchorX = self.dotPositions -> data[self.limbParents -> data[self.mouseDraggingDot].i * 2].d;
+                    self.positionAnchorY = self.dotPositions -> data[self.limbParents -> data[self.mouseDraggingDot].i * 2 + 1].d;
                 }
             }
         } else {
@@ -307,7 +324,12 @@ void editingMouseTick() {
                     self.sticks -> data[self.mouseStickIndex].r -> data[1].d = (turtle.mouseY - self.mouseAnchorY) + self.positionAnchorY;
                 } else {
                     /* change angle */
+                    double lastAngle = self.sticks -> data[self.mouseStickIndex].r -> data[self.mouseDraggingDot].d;
                     self.sticks -> data[self.mouseStickIndex].r -> data[self.mouseDraggingDot].d = 57.2958 * atan2(turtle.mouseX - self.positionAnchorX, turtle.mouseY - self.positionAnchorY);
+                    double angleChange = self.sticks -> data[self.mouseStickIndex].r -> data[self.mouseDraggingDot].d - lastAngle;
+                    for (int32_t i = 0; i < self.limbChildren -> data[self.mouseDraggingDot].r -> length; i++) {
+                        self.sticks -> data[self.mouseStickIndex].r -> data[self.limbChildren -> data[self.mouseDraggingDot].r -> data[i].i].d += angleChange;
+                    }
                 }
             }
         }
