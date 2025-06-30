@@ -71,6 +71,9 @@ typedef struct {
     tt_slider_t *onionSlider;
     int8_t frame;
     tt_button_t *frameButton;
+    int32_t frameNumber; // number of frame being edited
+    double frameBarX;
+    double frameBarY;
 
 } stickAnimator_t;
 
@@ -155,12 +158,40 @@ void init() {
     self.onionSlider = sliderInit("Onion", &self.onionNumber, TT_SLIDER_HORIZONTAL, TT_SLIDER_ALIGN_CENTER, -220, 152, 6, 40, 0, 3, 1);
     self.frame = 0;
     self.frameButton = buttonInit("Frame", &self.frame, -270, 152, 6);
+    self.frameNumber = 0;
+    self.frameBarX = -180;
+    self.frameBarY = 160;
+}
+
+void insertFrame(int32_t index, int32_t frameIndex) {
+    list_t *stick = self.sticks -> data[index].r;
+    list_t *constructedList = list_init();
+    list_append(constructedList, stick -> data[STICK_X], 'd');
+    list_append(constructedList, stick -> data[STICK_Y], 'd');
+    list_append(constructedList, stick -> data[STICK_LOWER_BODY], 'd');
+    list_append(constructedList, stick -> data[STICK_UPPER_BODY], 'd');
+    list_append(constructedList, stick -> data[STICK_HEAD], 'd');
+    list_append(constructedList, stick -> data[STICK_LEFT_UPPER_ARM], 'd');
+    list_append(constructedList, stick -> data[STICK_LEFT_LOWER_ARM], 'd');
+    list_append(constructedList, stick -> data[STICK_RIGHT_UPPER_ARM], 'd');
+    list_append(constructedList, stick -> data[STICK_RIGHT_LOWER_ARM], 'd');
+    list_append(constructedList, stick -> data[STICK_LEFT_UPPER_LEG], 'd');
+    list_append(constructedList, stick -> data[STICK_LEFT_LOWER_LEG], 'd');
+    list_append(constructedList, stick -> data[STICK_RIGHT_LOWER_LEG], 'd');
+    list_append(constructedList, stick -> data[STICK_RIGHT_UPPER_LEG], 'd');
+    list_insert(self.animations, frameIndex, (unitype) constructedList, 'r');
+    list_print(self.animations);
 }
 
 void handleUI() {
+    turtleRectangleColor(-320, 180, -200, 140, 255, 255, 255, 0);
     if (self.mode) {
         self.onionSlider -> enabled = TT_ELEMENT_ENABLED;
         self.frameButton -> enabled = TT_ELEMENT_ENABLED;
+        if (self.frame) {
+            insertFrame(0, self.frameNumber);
+            self.frameNumber++;
+        }
     } else {
         self.onionSlider -> enabled = TT_ELEMENT_HIDE;
         self.frameButton -> enabled = TT_ELEMENT_HIDE;
@@ -309,6 +340,24 @@ void renderDots(int32_t index) {
     turtlePenDown();
     turtlePenUp();
     checkMouse(stick, index, STICK_HEAD);
+}
+
+void renderFrames() {
+    for (int32_t i = 0; i < self.animations -> length; i++) {
+        double frameXLeft = self.frameBarX + i * 66;
+        double frameYUp = self.frameBarY;
+        double frameXRight = frameXLeft + 64; 
+        double frameYDown = self.frameBarY - 36;
+        turtleGoto(frameXLeft, frameYUp);
+        turtlePenColor(0, 0, 0);
+        turtlePenSize(1);
+        turtlePenDown();
+        turtleGoto(frameXRight, frameYUp);
+        turtleGoto(frameXRight, frameYDown);
+        turtleGoto(frameXLeft, frameYDown);
+        turtleGoto(frameXLeft, frameYUp);
+        turtlePenUp();
+    }
 }
 
 void renderGround() {
@@ -489,13 +538,14 @@ int main(int argc, char *argv[]) {
         turtleClear();
         tt_setColor(TT_COLOR_TEXT);
         turtleTextWriteStringf(-310, -170, 5, 0, "%.2lf, %.2lf", turtle.mouseX, turtle.mouseY);
-        handleUI();
         renderGround();
-        renderStick(0);
+        // renderStick(0);
         if (self.mode) {
             renderDots(0);
+            renderFrames();
             editingMouseTick();
         }
+        handleUI();
         turtleToolsUpdate(); // update turtleTools
         parseRibbonOutput(); // user defined function to use ribbon
         parsePopupOutput(window); // user defined function to use popup
