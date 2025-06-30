@@ -2,6 +2,15 @@
 #include "include/osTools.h"
 #include <time.h>
 
+/*
+TODO:
+- sync currentAnimation and currentFrame names so that it makes more sense
+- organise scripts and levels of heirarchy in code
+- face the music and admit that you cannot support multiple sticks
+- play animations
+- binding keys to animations?
+*/
+
 typedef enum {
     STICK_STYLE_OPEN_HEAD = 0,
     STICK_STYLE_CLOSED_HEAD = 1,
@@ -58,7 +67,7 @@ typedef struct {
     list_t *animations;
     /* animations format
     [
-        [filepath, name, number of frames, reserved, reserved, reserved, reserved, reserved,
+        [filepath, name, number of frames, startingX, startingY, reserved, reserved, reserved,
             [changeX, changeY, lower body, upper body, head, left upper arm, left lower arm, right upper arm, right lower arm, left upper leg, left lower leg, right upper leg, right lower leg
             changeX, changeY, lower body, upper body, head, left upper arm, left lower arm, right upper arm, right lower arm, left upper leg, left lower leg, right upper leg, right lower leg
             changeX, changeY, lower body, upper body, head, left upper arm, left lower arm, right upper arm, right lower arm, left upper leg, left lower leg, right upper leg, right lower leg
@@ -81,6 +90,7 @@ typedef struct {
     double positionAnchorX;
     double positionAnchorY;
     int32_t mouseHoverFrame;
+    int32_t mouseHoverAnimation;
 
     int8_t mode; // 0 - normal mode, 1 - editing mode
     tt_switch_t *modeSwitch;
@@ -94,35 +104,17 @@ typedef struct {
     double frameScroll;
     tt_scrollbar_t *frameScrollbar;
     int32_t animationSaveIndex;
-
+    double animationBarX;
+    double animationBarY;
+    double animationScroll;
+    tt_scrollbar_t *animationScrollbar;
 } stickAnimator_t;
 
 stickAnimator_t self;
 
-void createStick(list_t *stick) {
-    list_append(stick, (unitype) -280.0, 'd'); // position X
-    list_append(stick, (unitype) -50.0, 'd'); // position Y
-    list_append(stick, (unitype) 0.5, 'd'); // size
-    list_append(stick, (unitype) STICK_STYLE_OPEN_HEAD, 'i'); // style
-    list_append(stick, (unitype) 110.0, 'd'); // red
-    list_append(stick, (unitype) 16.0, 'd'); // green
-    list_append(stick, (unitype) 190.0, 'd'); // blue
-    list_append(stick, (unitype) 0.0, 'd'); // alpha
-    for (int32_t i = 0; i < 8; i++) {
-        list_append(stick, (unitype) 0.0, 'd'); // reserved
-    }
-    list_append(stick, (unitype) 5.0, 'd'); // lower body
-    list_append(stick, (unitype) 5.0, 'd'); // upper body
-    list_append(stick, (unitype) 5.0, 'd'); // head
-    list_append(stick, (unitype) -150.0, 'd'); // upper left arm
-    list_append(stick, (unitype) 170.0, 'd'); // lower left arm
-    list_append(stick, (unitype) 170.0, 'd'); // upper right arm
-    list_append(stick, (unitype) 150.0, 'd'); // lower right arm
-    list_append(stick, (unitype) -175.0, 'd'); // upper left leg
-    list_append(stick, (unitype) -170.0, 'd'); // lower left leg
-    list_append(stick, (unitype) 160.0, 'd'); // upper right leg
-    list_append(stick, (unitype) 170.0, 'd'); // lower right leg
-}
+void createStick(list_t *stick);
+void insertFrame(int32_t index, int32_t frameIndex);
+void generateAnimation(char *name);
 
 void init() {
     self.sticks = list_init();
@@ -170,14 +162,16 @@ void init() {
     list_append(self.limbChildren -> data[STICK_RIGHT_UPPER_LEG].r, (unitype) STICK_RIGHT_LOWER_LEG, 'i');
 
     self.currentAnimation = list_init();
+    insertFrame(0, 0);
     self.mouseHoverDot = -1;
     self.mouseDraggingDot = -1;
     self.mouseAnchorX = 0;
     self.mouseAnchorY = 0;
     self.mouseHoverFrame = -1;
+    self.mouseHoverAnimation = -1;
 
     /* UI elements */
-    self.mode = 0;
+    self.mode = 1;
     self.modeSwitch = switchInit("Mode", &self.mode, -305, 152, 6);
     self.onionNumber = 0;
     self.onionSlider = sliderInit("Onion", &self.onionNumber, TT_SLIDER_HORIZONTAL, TT_SLIDER_ALIGN_CENTER, -220, 152, 6, 40, 0, 3, 1);
@@ -191,9 +185,41 @@ void init() {
 
     /* animations */
     self.animations = list_init();
+    generateAnimation("null");
     self.animationSaveIndex = 0;
+    self.animationBarX = 250;
+    self.animationBarY = 113;
+    self.animationScroll = 0;
+    self.animationScrollbar = scrollbarInit(&self.animationScroll, TT_SCROLLBAR_VERTICAL, (self.animationBarX) - 5, (self.animationBarY - 175) / 2, 6, 286, 90);
 }
 
+/* create stick in default position */
+void createStick(list_t *stick) {
+    list_append(stick, (unitype) -280.0, 'd'); // position X
+    list_append(stick, (unitype) -50.0, 'd'); // position Y
+    list_append(stick, (unitype) 0.5, 'd'); // size
+    list_append(stick, (unitype) STICK_STYLE_OPEN_HEAD, 'i'); // style
+    list_append(stick, (unitype) 110.0, 'd'); // red
+    list_append(stick, (unitype) 16.0, 'd'); // green
+    list_append(stick, (unitype) 190.0, 'd'); // blue
+    list_append(stick, (unitype) 0.0, 'd'); // alpha
+    for (int32_t i = 0; i < 8; i++) {
+        list_append(stick, (unitype) 0.0, 'd'); // reserved
+    }
+    list_append(stick, (unitype) 5.0, 'd'); // lower body
+    list_append(stick, (unitype) 5.0, 'd'); // upper body
+    list_append(stick, (unitype) 5.0, 'd'); // head
+    list_append(stick, (unitype) -150.0, 'd'); // upper left arm
+    list_append(stick, (unitype) 170.0, 'd'); // lower left arm
+    list_append(stick, (unitype) 170.0, 'd'); // upper right arm
+    list_append(stick, (unitype) 150.0, 'd'); // lower right arm
+    list_append(stick, (unitype) -175.0, 'd'); // upper left leg
+    list_append(stick, (unitype) -170.0, 'd'); // lower left leg
+    list_append(stick, (unitype) 160.0, 'd'); // upper right leg
+    list_append(stick, (unitype) 170.0, 'd'); // lower right leg
+}
+
+/* insert frame to currentAnimation */
 void insertFrame(int32_t index, int32_t frameIndex) {
     list_t *stick = self.sticks -> data[index].r;
     list_t *constructedList = list_init();
@@ -249,15 +275,43 @@ void loadCurrentFrame(int32_t index) {
     stick -> data[STICK_RIGHT_LOWER_LEG] = self.currentAnimation -> data[self.currentFrame].r -> data[12];
 }
 
+/* update currentAnimation with animationSaveIndex */
+void loadCurrentAnimation() {
+    list_clear(self.currentAnimation);
+    double xpos = self.animations -> data[self.animationSaveIndex].r -> data[3].d;
+    double ypos = self.animations -> data[self.animationSaveIndex].r -> data[4].d;
+    for (int32_t i = 0; i < self.animations -> data[self.animationSaveIndex].r -> length - 8; i++) {
+        list_t *constructedList = list_init();
+        xpos += self.animations -> data[self.animationSaveIndex].r -> data[8 + i].r -> data[0].d;
+        ypos += self.animations -> data[self.animationSaveIndex].r -> data[8 + i].r -> data[1].d;
+        list_append(constructedList, (unitype) xpos, 'd');
+        list_append(constructedList, (unitype) ypos, 'd');
+        list_append(constructedList, self.animations -> data[self.animationSaveIndex].r -> data[8 + i].r -> data[2], 'd');
+        list_append(constructedList, self.animations -> data[self.animationSaveIndex].r -> data[8 + i].r -> data[3], 'd');
+        list_append(constructedList, self.animations -> data[self.animationSaveIndex].r -> data[8 + i].r -> data[4], 'd');
+        list_append(constructedList, self.animations -> data[self.animationSaveIndex].r -> data[8 + i].r -> data[5], 'd');
+        list_append(constructedList, self.animations -> data[self.animationSaveIndex].r -> data[8 + i].r -> data[6], 'd');
+        list_append(constructedList, self.animations -> data[self.animationSaveIndex].r -> data[8 + i].r -> data[7], 'd');
+        list_append(constructedList, self.animations -> data[self.animationSaveIndex].r -> data[8 + i].r -> data[8], 'd');
+        list_append(constructedList, self.animations -> data[self.animationSaveIndex].r -> data[8 + i].r -> data[9], 'd');
+        list_append(constructedList, self.animations -> data[self.animationSaveIndex].r -> data[8 + i].r -> data[10], 'd');
+        list_append(constructedList, self.animations -> data[self.animationSaveIndex].r -> data[8 + i].r -> data[11], 'd');
+        list_append(constructedList, self.animations -> data[self.animationSaveIndex].r -> data[8 + i].r -> data[12], 'd');
+        list_append(self.currentAnimation, (unitype) constructedList, 'r');
+    }
+}
+
 void handleUI() {
     // printf("%d\n", self.frameNumber);
-    turtleRectangleColor(-320, 180, -181, 100, 255, 255, 255, 0);
+    turtleRectangleColor(-320, 180, self.frameBarX - 1, 100, 255, 255, 255, 0);
     if (self.mode) {
         self.onionSlider -> enabled = TT_ELEMENT_ENABLED;
         self.frameButton -> enabled = TT_ELEMENT_ENABLED;
         if (self.currentAnimation -> length >= 8) {
             self.frameScrollbar -> enabled = TT_ELEMENT_ENABLED;
             self.frameScrollbar -> barPercentage = 100 / (self.currentAnimation -> length / 7.8);
+        } else {
+            self.frameScrollbar -> enabled = TT_ELEMENT_HIDE;
         }
         if (self.frameButtonPressed) {
             insertFrame(0, self.currentFrame);
@@ -270,6 +324,12 @@ void handleUI() {
         self.onionSlider -> enabled = TT_ELEMENT_HIDE;
         self.frameButton -> enabled = TT_ELEMENT_HIDE;
         self.frameScrollbar -> enabled = TT_ELEMENT_HIDE;
+    }
+    if (self.animations -> length >= 8) {
+        self.animationScrollbar -> enabled = TT_ELEMENT_ENABLED;
+        self.frameScrollbar -> barPercentage = 100 / (self.currentAnimation -> length / 6.8);
+    } else {
+        self.animationScrollbar -> enabled = TT_ELEMENT_HIDE;
     }
 }
 
@@ -422,7 +482,7 @@ void renderFrames() {
         double frameXLeft = self.frameBarX + i * 66 - self.frameScroll * (self.currentAnimation -> length - 7.5) * 0.66;
         double frameYUp = self.frameBarY;
         double frameXRight = frameXLeft + 64; 
-        double frameYDown = self.frameBarY - 36;
+        double frameYDown = frameYUp - 36;
         if (frameXRight < self.frameBarX) {
             continue;
         }
@@ -451,7 +511,7 @@ void renderFrames() {
         turtleGoto(frameXLeft, frameYDown);
         turtleGoto(frameXLeft, frameYUp);
         turtlePenUp();
-        turtleTextWriteStringf(frameXLeft + 2, frameYUp - 5, 5, 0, "%d", i);
+        turtleTextWriteStringf(frameXLeft + 2, frameYUp - 5, 5, 0, "%d", i + 1);
         /* draw stick */
         list_t *tempStick = list_init();
         createStick(tempStick);
@@ -475,90 +535,204 @@ void renderFrames() {
 }
 
 void renderGround() {
+    turtlePenShape("square");
     turtlePenColor(0, 0, 0);
     turtlePenSize(4);
     turtleGoto(-320, -86);
     turtlePenDown();
-    turtleGoto(320, turtle.y);
+    turtleGoto(240, turtle.y);
     turtlePenUp();
+    turtlePenShape("circle");
+}
+
+void renderAnimations() {
+    self.mouseHoverAnimation = -1;
+    for (int32_t i = 0; i < self.animations -> length; i++) {
+        double animationXLeft = self.animationBarX;
+        double animationYUp = self.animationBarY - i * 38 + self.animationScroll * (self.animations -> length - 7.5) * 0.38;
+        double animationXRight = animationXLeft + 64;
+        double animationYDown = animationYUp - 36;
+        if (animationYDown > self.animationBarY) {
+            continue;
+        }
+        if (animationYUp < -180) {
+            break;
+        }
+        /* detect mouse */
+        if (turtle.mouseX >= animationXLeft && turtle.mouseX <= animationXRight && turtle.mouseY >= animationYDown && turtle.mouseY <= animationYUp) {
+            self.mouseHoverAnimation = i;
+        }
+        /* draw box */
+        if (self.animationSaveIndex == i) {
+            turtlePenColor(16, 180, 190);
+            turtlePenSize(1.5);
+        } else if (self.mouseHoverAnimation == i) {
+            turtlePenColor(150, 150, 150);
+            turtlePenSize(1);
+        } else {
+            turtlePenColor(0, 0, 0);
+            turtlePenSize(1);
+        }
+        turtleGoto(animationXLeft, animationYUp);
+        turtlePenDown();
+        turtleGoto(animationXRight, animationYUp);
+        turtleGoto(animationXRight, animationYDown);
+        turtleGoto(animationXLeft, animationYDown);
+        turtleGoto(animationXLeft, animationYUp);
+        turtlePenUp();
+        turtleTextWriteStringf(animationXLeft + 2, animationYUp - 5, 5, 0, "%d", i + 1);
+        /* draw thumbnail */
+        list_t *tempStick = list_init();
+        createStick(tempStick);
+        tempStick -> data[STICK_SIZE].d = 0.05;
+        tempStick -> data[STICK_X].d = animationXLeft + ((self.animations -> data[i].r -> data[3].d + 330) / 660) * (animationXRight - animationXLeft);
+        tempStick -> data[STICK_Y].d = animationYDown + ((self.animations -> data[i].r -> data[4].d + 190) / 380) * (animationYUp - animationYDown);
+        tempStick -> data[STICK_LOWER_BODY].d = self.animations -> data[i].r -> data[8].r -> data[2].d;
+        tempStick -> data[STICK_UPPER_BODY].d = self.animations -> data[i].r -> data[8].r -> data[3].d;
+        tempStick -> data[STICK_HEAD].d = self.animations -> data[i].r -> data[8].r -> data[4].d;
+        tempStick -> data[STICK_LEFT_UPPER_ARM].d = self.animations -> data[i].r -> data[8].r -> data[5].d;
+        tempStick -> data[STICK_LEFT_LOWER_ARM].d = self.animations -> data[i].r -> data[8].r -> data[6].d;
+        tempStick -> data[STICK_RIGHT_UPPER_ARM].d = self.animations -> data[i].r -> data[8].r -> data[7].d;
+        tempStick -> data[STICK_RIGHT_LOWER_ARM].d = self.animations -> data[i].r -> data[8].r -> data[8].d;
+        tempStick -> data[STICK_LEFT_UPPER_LEG].d = self.animations -> data[i].r -> data[8].r -> data[9].d;
+        tempStick -> data[STICK_LEFT_LOWER_LEG].d = self.animations -> data[i].r -> data[8].r -> data[10].d;
+        tempStick -> data[STICK_RIGHT_UPPER_LEG].d = self.animations -> data[i].r -> data[8].r -> data[11].d;
+        tempStick -> data[STICK_RIGHT_LOWER_LEG].d = self.animations -> data[i].r -> data[8].r -> data[12].d;
+        renderStick(tempStick);
+        list_free(tempStick);
+    }
+    turtleRectangleColor(self.animationBarX - 10, self.animationBarY + 1, 320, 180, 255, 255, 255, 0);
+}
+
+/* import animation from file */
+void importAnimation(char *filename) {
+    uint32_t fileSize;
+    char *fileData = (char *) osToolsMapFile(filename, &fileSize);
+    if (fileData == NULL) {
+        return;
+    }
+    list_t *outputList = list_init();
+    int32_t left = 1;
+    int32_t right = 1;
+    int32_t extractionIndex = 0;
+    int8_t inList = 0;
+    while (right < fileSize) {
+        if (fileData[right] == '[') {
+            list_append(outputList, (unitype) list_init(), 'r');
+            left = right + 1;
+            inList = 1;
+        }
+        if (fileData[right] == ']' && right < fileSize) {
+            fileData[right] = '\0';
+            if (extractionIndex == 0 || extractionIndex == 1) {
+                /* string */
+                list_append(outputList, (unitype) (fileData + left), 's');
+            } else if (extractionIndex == 2) {
+                /* int */
+                int32_t readInt;
+                sscanf(fileData + left, "%d", &readInt);
+                list_append(outputList, (unitype) readInt, 'i');
+            } else {
+                /* double */
+                double readDouble;
+                sscanf(fileData + left, "%lf", &readDouble);
+                if (inList) {
+                    list_append(outputList -> data[outputList -> length - 1].r, (unitype) readDouble, 'd');
+                } else {
+                    list_append(outputList, (unitype) readDouble, 'd');
+                }
+            }
+            fileData[right] = ']';
+            right += 2;
+            left = right + 1;
+            extractionIndex++;
+            inList = 0;
+        }
+        if (fileData[right] == ',') {
+            fileData[right] = '\0';
+            if (extractionIndex == 0 || extractionIndex == 1) {
+                /* string */
+                list_append(outputList, (unitype) (fileData + left), 's');
+            } else if (extractionIndex == 2) {
+                /* int */
+                int32_t readInt;
+                sscanf(fileData + left, "%d", &readInt);
+                list_append(outputList, (unitype) readInt, 'i');
+            } else {
+                /* double */
+                double readDouble;
+                sscanf(fileData + left, "%lf", &readDouble);
+                if (inList) {
+                    list_append(outputList -> data[outputList -> length - 1].r, (unitype) readDouble, 'd');
+                } else {
+                    list_append(outputList, (unitype) readDouble, 'd');
+                }
+            }
+            fileData[right] = ',';
+            right++;
+            left = right + 1;
+            extractionIndex++;
+        }
+        right++;
+    }
+    osToolsUnmapFile((uint8_t *) fileData);
+    list_append(self.animations, (unitype) outputList, 'r');
 }
 
 /* generate or edit animation from currentAnimation */
 void generateAnimation(char *name) {
+    list_t *newAnimation = list_init();
+    list_append(newAnimation, (unitype) name, 's'); // filepath
+    int32_t nameIndex = strlen(name) - 1;
+    while (nameIndex >= 0) {
+        if (name[nameIndex] == '\\' || name[nameIndex] == '/') {
+            break;
+        }
+        nameIndex--;
+    }
+    if (nameIndex != -1) {
+        list_append(newAnimation, (unitype) (name + nameIndex + 1), 's'); // name
+    } else {
+        list_append(newAnimation, (unitype) "Error: could not parse filename", 's');
+    }
+    list_append(newAnimation, (unitype) self.currentAnimation -> length, 'i'); // number of frames
+    if (self.currentAnimation -> length > 0) {
+        list_append(newAnimation, self.currentAnimation -> data[0].r -> data[0], 'd'); // startingX
+        list_append(newAnimation, self.currentAnimation -> data[0].r -> data[1], 'd'); // startingY
+    } else {
+        list_append(newAnimation, (unitype) 0, 'd');
+        list_append(newAnimation, (unitype) 0, 'd');
+    }
+    for (int32_t i = 0; i < 3; i++) {
+        list_append(newAnimation, (unitype) 0, 'd'); // reserved
+    }
+    list_t *animationContents = list_init();
+    list_copy(animationContents, self.currentAnimation);
+    if (self.currentAnimation -> length > 0) {
+        animationContents -> data[0].r -> data[0].d = 0;
+        animationContents -> data[0].r -> data[1].d = 0;
+    }
+    for (int32_t i = 0; i < animationContents -> length; i++) {
+        if (i > 0) {
+            animationContents -> data[i].r -> data[0].d = self.currentAnimation -> data[i].r -> data[0].d - self.currentAnimation -> data[i - 1].r -> data[0].d;
+            animationContents -> data[i].r -> data[1].d = self.currentAnimation -> data[i].r -> data[1].d - self.currentAnimation -> data[i - 1].r -> data[1].d;
+        }
+        list_append(newAnimation, animationContents -> data[i], 'r');
+    }
     if (self.animationSaveIndex < self.animations -> length) {
         /* update existing animation */
-        list_t *newAnimation = list_init();
-        list_append(newAnimation, (unitype) name, 's');
-        int32_t nameIndex = strlen(name) - 1;
-        while (nameIndex >= 0) {
-            if (name[nameIndex] == '\\' || name[nameIndex] == '/') {
-                break;
-            }
-            nameIndex--;
-        }
-        if (nameIndex != -1) {
-            list_append(newAnimation, (unitype) (name + nameIndex + 1), 's');
-        } else {
-            list_append(newAnimation, (unitype) "Error: could not parse filename", 's');
-        }
-        list_append(newAnimation, (unitype) self.currentAnimation -> length, 'i');
-        for (int32_t i = 0; i < 5; i++) {
-            list_append(newAnimation, (unitype) 0, 'd'); // reserved
-        }
-        list_t *animationContents = list_init();
-        list_copy(animationContents, self.currentAnimation);
-        if (self.currentAnimation -> length > 0) {
-            animationContents -> data[0].r -> data[0].d = 0;
-            animationContents -> data[0].r -> data[1].d = 0;
-        }
-        for (int32_t i = 0; i < animationContents -> length; i++) {
-            if (i > 0) {
-                animationContents -> data[i].r -> data[0].d = self.currentAnimation -> data[i].r -> data[0].d - self.currentAnimation -> data[i - 1].r -> data[0].d;
-                animationContents -> data[i].r -> data[1].d = self.currentAnimation -> data[i].r -> data[1].d - self.currentAnimation -> data[i - 1].r -> data[1].d;
-            }
-            list_append(newAnimation, animationContents -> data[i], 'r');
-        }
-        list_delete(self.animations, self.animationSaveIndex),
+        list_delete(self.animations, self.animationSaveIndex);
         list_insert(self.animations, self.animationSaveIndex, (unitype) newAnimation, 'r');
     } else {
         /* create animation */
-        list_t *newAnimation = list_init();
-        list_append(newAnimation, (unitype) name, 's');
-        int32_t nameIndex = strlen(name) - 1;
-        while (nameIndex >= 0) {
-            if (name[nameIndex] == '\\' || name[nameIndex] == '/') {
-                break;
-            }
-            nameIndex--;
-        }
-        if (nameIndex != -1) {
-            list_append(newAnimation, (unitype) (name + nameIndex + 1), 's');
-        } else {
-            list_append(newAnimation, (unitype) "Error: could not parse filename", 's');
-        }
-        list_append(newAnimation, (unitype) self.currentAnimation -> length, 'i');
-        for (int32_t i = 0; i < 5; i++) {
-            list_append(newAnimation, (unitype) 0, 'd'); // reserved
-        }
-        list_t *animationContents = list_init();
-        list_copy(animationContents, self.currentAnimation);
-        if (self.currentAnimation -> length > 0) {
-            animationContents -> data[0].r -> data[0].d = 0;
-            animationContents -> data[0].r -> data[1].d = 0;
-        }
-        for (int32_t i = 0; i < animationContents -> length; i++) {
-            if (i > 0) {
-                animationContents -> data[i].r -> data[0].d = self.currentAnimation -> data[i].r -> data[0].d - self.currentAnimation -> data[i - 1].r -> data[0].d;
-                animationContents -> data[i].r -> data[1].d = self.currentAnimation -> data[i].r -> data[1].d - self.currentAnimation -> data[i - 1].r -> data[1].d;
-            }
-            list_append(newAnimation, animationContents -> data[i], 'r');
-        }
         list_append(self.animations, (unitype) newAnimation, 'r');
     }
-    FILE *fp = fopen(name, "w");
-    list_fprint_emb(fp, self.animations -> data[self.animationSaveIndex].r);
-    fclose(fp);
-    list_print(self.animations -> data[self.animationSaveIndex].r);
+    if (strcmp(name, "null") != 0) {
+        FILE *fp = fopen(name, "w");
+        list_fprint_emb(fp, self.animations -> data[self.animationSaveIndex].r);
+        fclose(fp);
+    }
+    // list_print(self.animations);
 }
 
 void mouseTick() {
@@ -580,6 +754,12 @@ void mouseTick() {
             }
             if (self.mode && self.mouseHoverFrame != -1) {
                 self.currentFrame = self.mouseHoverFrame;
+                loadCurrentFrame(0);
+            }
+            if (self.mouseHoverAnimation != -1) {
+                self.animationSaveIndex = self.mouseHoverAnimation;
+                loadCurrentAnimation();
+                self.currentFrame = 0;
                 loadCurrentFrame(0);
             }
         } else {
@@ -605,7 +785,9 @@ void mouseTick() {
         if (self.mouseDraggingDot != -1) {
             self.mouseDraggingDot = -1;
             /* update current frame */
-            updateCurrentFrame(0, self.currentFrame);
+            if (self.currentFrame < self.currentAnimation -> length) {
+                updateCurrentFrame(0, self.currentFrame);
+            }
         }
     }
     if (turtleKeyPressed(GLFW_KEY_LEFT_CONTROL)) {
@@ -622,12 +804,12 @@ void mouseTick() {
                 /* save */
                 if (strcmp(osToolsFileDialog.selectedFilename, "null") == 0) {
                     if (osToolsFileDialogPrompt(1, "") != -1) {
-                        printf("Saved to: %s\n", osToolsFileDialog.selectedFilename);
                         generateAnimation(osToolsFileDialog.selectedFilename);
+                        printf("Saved to: %s\n", osToolsFileDialog.selectedFilename);
                     }
                 } else {
-                    printf("Saved to: %s\n", osToolsFileDialog.selectedFilename);
                     generateAnimation(osToolsFileDialog.selectedFilename);
+                    printf("Saved to: %s\n", osToolsFileDialog.selectedFilename);
                 }
             }
         }
@@ -641,29 +823,32 @@ void parseRibbonOutput() {
         ribbonRender.output[0] = 0;
         if (ribbonRender.output[1] == 0) { // File
             if (ribbonRender.output[2] == 1) { // New
-                printf("New\n");
                 strcpy(osToolsFileDialog.selectedFilename, "null");
                 self.animationSaveIndex++;
+                list_clear(self.currentAnimation);
+                insertFrame(0, 0);
+                generateAnimation("null");
             }
             if (ribbonRender.output[2] == 2) { // Save
                 if (strcmp(osToolsFileDialog.selectedFilename, "null") == 0) {
                     if (osToolsFileDialogPrompt(1, "") != -1) {
-                        printf("Saved to: %s\n", osToolsFileDialog.selectedFilename);
                         generateAnimation(osToolsFileDialog.selectedFilename);
+                        printf("Saved to: %s\n", osToolsFileDialog.selectedFilename);
                     }
                 } else {
-                    printf("Saved to: %s\n", osToolsFileDialog.selectedFilename);
                     generateAnimation(osToolsFileDialog.selectedFilename);
+                    printf("Saved to: %s\n", osToolsFileDialog.selectedFilename);
                 }
             }
             if (ribbonRender.output[2] == 3) { // Save As...
                 if (osToolsFileDialogPrompt(1, "") != -1) {
-                    printf("Saved to: %s\n", osToolsFileDialog.selectedFilename);
                     generateAnimation(osToolsFileDialog.selectedFilename);
+                    printf("Saved to: %s\n", osToolsFileDialog.selectedFilename);
                 }
             }
             if (ribbonRender.output[2] == 4) { // Open
                 if (osToolsFileDialogPrompt(0, "") != -1) {
+                    importAnimation(osToolsFileDialog.selectedFilename);
                     printf("Loaded data from: %s\n", osToolsFileDialog.selectedFilename);
                 }
             }
@@ -771,6 +956,7 @@ int main(int argc, char *argv[]) {
         turtleTextWriteStringf(-310, -170, 5, 0, "%.2lf, %.2lf", turtle.mouseX, turtle.mouseY);
         renderGround();
         // renderStick(self.sticks -> data[0].r);
+        renderAnimations();
         if (self.mode) {
             renderDots(0);
             renderFrames();
