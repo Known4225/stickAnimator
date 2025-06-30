@@ -58,7 +58,7 @@ typedef struct {
     list_t *animations;
     /* animations format
     [
-        [name, reserved, reserved, reserved, reserved, reserved, reserved, reserved,
+        [filepath, name, number of frames, reserved, reserved, reserved, reserved, reserved,
             [changeX, changeY, lower body, upper body, head, left upper arm, left lower arm, right upper arm, right lower arm, left upper leg, left lower leg, right upper leg, right lower leg
             changeX, changeY, lower body, upper body, head, left upper arm, left lower arm, right upper arm, right lower arm, left upper leg, left lower leg, right upper leg, right lower leg
             changeX, changeY, lower body, upper body, head, left upper arm, left lower arm, right upper arm, right lower arm, left upper leg, left lower leg, right upper leg, right lower leg
@@ -433,11 +433,57 @@ void renderGround() {
 void generateAnimation(char *name) {
     if (self.animationSaveIndex < self.animations -> length) {
         /* update existing animation */
+        list_t *newAnimation = list_init();
+        list_append(newAnimation, (unitype) name, 's');
+        int32_t nameIndex = strlen(name) - 1;
+        while (nameIndex >= 0) {
+            if (name[nameIndex] == '\\' || name[nameIndex] == '/') {
+                break;
+            }
+            nameIndex--;
+        }
+        if (nameIndex != -1) {
+            list_append(newAnimation, (unitype) (name + nameIndex + 1), 's');
+        } else {
+            list_append(newAnimation, (unitype) "Error: could not parse filename", 's');
+        }
+        list_append(newAnimation, (unitype) self.currentAnimation -> length, 'i');
+        for (int32_t i = 0; i < 5; i++) {
+            list_append(newAnimation, (unitype) 0, 'd'); // reserved
+        }
+        list_t *animationContents = list_init();
+        list_copy(animationContents, self.currentAnimation);
+        if (self.currentAnimation -> length > 0) {
+            animationContents -> data[0].r -> data[0].d = 0;
+            animationContents -> data[0].r -> data[1].d = 0;
+        }
+        for (int32_t i = 0; i < animationContents -> length; i++) {
+            if (i > 0) {
+                animationContents -> data[i].r -> data[0].d = self.currentAnimation -> data[i].r -> data[0].d - self.currentAnimation -> data[i - 1].r -> data[0].d;
+                animationContents -> data[i].r -> data[1].d = self.currentAnimation -> data[i].r -> data[1].d - self.currentAnimation -> data[i - 1].r -> data[1].d;
+            }
+            list_append(newAnimation, animationContents -> data[i], 'r');
+        }
+        list_delete(self.animations, self.animationSaveIndex),
+        list_insert(self.animations, self.animationSaveIndex, (unitype) newAnimation, 'r');
     } else {
         /* create animation */
         list_t *newAnimation = list_init();
         list_append(newAnimation, (unitype) name, 's');
-        for (int32_t i = 0; i < 7; i++) {
+        int32_t nameIndex = strlen(name) - 1;
+        while (nameIndex >= 0) {
+            if (name[nameIndex] == '\\' || name[nameIndex] == '/') {
+                break;
+            }
+            nameIndex--;
+        }
+        if (nameIndex != -1) {
+            list_append(newAnimation, (unitype) (name + nameIndex + 1), 's');
+        } else {
+            list_append(newAnimation, (unitype) "Error: could not parse filename", 's');
+        }
+        list_append(newAnimation, (unitype) self.currentAnimation -> length, 'i');
+        for (int32_t i = 0; i < 5; i++) {
             list_append(newAnimation, (unitype) 0, 'd'); // reserved
         }
         list_t *animationContents = list_init();
@@ -455,9 +501,9 @@ void generateAnimation(char *name) {
         }
         list_append(self.animations, (unitype) newAnimation, 'r');
     }
-    // FILE *fp = fopen(name, "w");
-    // list_fprint_emb(fp, self.animations -> data[self.animationSaveIndex].r);
-    // fclose(fp);
+    FILE *fp = fopen(name, "w");
+    list_fprint_emb(fp, self.animations -> data[self.animationSaveIndex].r);
+    fclose(fp);
     list_print(self.animations -> data[self.animationSaveIndex].r);
 }
 
