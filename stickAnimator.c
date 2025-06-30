@@ -56,7 +56,6 @@ typedef struct {
     list_t *limbChildren;
     int8_t keys[16];
 
-    int8_t mode; // 0 - normal mode, 1 - editing mode
     int32_t mouseStickIndex;
     int32_t mouseHoverDot;
     int32_t mouseDraggingDot;
@@ -65,6 +64,13 @@ typedef struct {
     double mouseAnchorY;
     double positionAnchorX;
     double positionAnchorY;
+
+    int8_t mode; // 0 - normal mode, 1 - editing mode
+    tt_switch_t *modeSwitch;
+    double onionNumber;
+    tt_slider_t *onionSlider;
+    int8_t frame;
+    tt_button_t *frameButton;
 
 } stickAnimator_t;
 
@@ -137,12 +143,28 @@ void init() {
     list_append(self.limbChildren -> data[STICK_RIGHT_UPPER_LEG].r, (unitype) STICK_RIGHT_LOWER_LEG, 'i');
 
     self.animations = list_init();
-    self.mode = 0;
-    switchInit("Mode", &self.mode, -305, 152, 6);
     self.mouseHoverDot = -1;
     self.mouseDraggingDot = -1;
     self.mouseAnchorX = 0;
     self.mouseAnchorY = 0;
+
+    /* UI elements */
+    self.mode = 0;
+    self.modeSwitch = switchInit("Mode", &self.mode, -305, 152, 6);
+    self.onionNumber = 0;
+    self.onionSlider = sliderInit("Onion", &self.onionNumber, TT_SLIDER_HORIZONTAL, TT_SLIDER_ALIGN_CENTER, -220, 152, 6, 40, 0, 3, 1);
+    self.frame = 0;
+    self.frameButton = buttonInit("Frame", &self.frame, -270, 152, 6);
+}
+
+void handleUI() {
+    if (self.mode) {
+        self.onionSlider -> enabled = TT_ELEMENT_ENABLED;
+        self.frameButton -> enabled = TT_ELEMENT_ENABLED;
+    } else {
+        self.onionSlider -> enabled = TT_ELEMENT_HIDE;
+        self.frameButton -> enabled = TT_ELEMENT_HIDE;
+    }
 }
 
 void renderStick(int32_t index) {
@@ -467,6 +489,7 @@ int main(int argc, char *argv[]) {
         turtleClear();
         tt_setColor(TT_COLOR_TEXT);
         turtleTextWriteStringf(-310, -170, 5, 0, "%.2lf, %.2lf", turtle.mouseX, turtle.mouseY);
+        handleUI();
         renderGround();
         renderStick(0);
         if (self.mode) {
