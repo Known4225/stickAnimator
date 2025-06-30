@@ -80,14 +80,15 @@ typedef struct {
     double mouseAnchorY;
     double positionAnchorX;
     double positionAnchorY;
+    int32_t mouseHoverFrame;
 
     int8_t mode; // 0 - normal mode, 1 - editing mode
     tt_switch_t *modeSwitch;
     double onionNumber;
     tt_slider_t *onionSlider;
-    int8_t frame;
+    int8_t frameButtonPressed;
     tt_button_t *frameButton;
-    int32_t frameNumber; // number of frame being edited
+    int32_t currentFrame; // number of frame being edited
     double frameBarX;
     double frameBarY;
     double frameScroll;
@@ -173,15 +174,16 @@ void init() {
     self.mouseDraggingDot = -1;
     self.mouseAnchorX = 0;
     self.mouseAnchorY = 0;
+    self.mouseHoverFrame = -1;
 
     /* UI elements */
     self.mode = 0;
     self.modeSwitch = switchInit("Mode", &self.mode, -305, 152, 6);
     self.onionNumber = 0;
     self.onionSlider = sliderInit("Onion", &self.onionNumber, TT_SLIDER_HORIZONTAL, TT_SLIDER_ALIGN_CENTER, -220, 152, 6, 40, 0, 3, 1);
-    self.frame = 0;
-    self.frameButton = buttonInit("Frame", &self.frame, -270, 152, 6);
-    self.frameNumber = 0;
+    self.frameButtonPressed = 0;
+    self.frameButton = buttonInit("Add Frame", &self.frameButtonPressed, -270, 152, 6);
+    self.currentFrame = 0;
     self.frameBarX = -180;
     self.frameBarY = 160;
     self.frameScroll = 0;
@@ -206,9 +208,45 @@ void insertFrame(int32_t index, int32_t frameIndex) {
     list_append(constructedList, stick -> data[STICK_RIGHT_LOWER_ARM], 'd');
     list_append(constructedList, stick -> data[STICK_LEFT_UPPER_LEG], 'd');
     list_append(constructedList, stick -> data[STICK_LEFT_LOWER_LEG], 'd');
-    list_append(constructedList, stick -> data[STICK_RIGHT_LOWER_LEG], 'd');
     list_append(constructedList, stick -> data[STICK_RIGHT_UPPER_LEG], 'd');
+    list_append(constructedList, stick -> data[STICK_RIGHT_LOWER_LEG], 'd');
     list_insert(self.currentAnimation, frameIndex, (unitype) constructedList, 'r');
+}
+
+/* sync stick with currentAnimation */
+void updateCurrentFrame(int32_t index, int32_t frameIndex) {
+    list_t *stick = self.sticks -> data[index].r;
+    self.currentAnimation -> data[frameIndex].r -> data[0] = stick -> data[STICK_X];
+    self.currentAnimation -> data[frameIndex].r -> data[1] = stick -> data[STICK_Y];
+    self.currentAnimation -> data[frameIndex].r -> data[2] = stick -> data[STICK_LOWER_BODY];
+    self.currentAnimation -> data[frameIndex].r -> data[3] = stick -> data[STICK_UPPER_BODY];
+    self.currentAnimation -> data[frameIndex].r -> data[4] = stick -> data[STICK_HEAD];
+    self.currentAnimation -> data[frameIndex].r -> data[5] = stick -> data[STICK_LEFT_UPPER_ARM];
+    self.currentAnimation -> data[frameIndex].r -> data[6] = stick -> data[STICK_LEFT_LOWER_ARM];
+    self.currentAnimation -> data[frameIndex].r -> data[7] = stick -> data[STICK_RIGHT_UPPER_ARM];
+    self.currentAnimation -> data[frameIndex].r -> data[8] = stick -> data[STICK_RIGHT_LOWER_ARM];
+    self.currentAnimation -> data[frameIndex].r -> data[9] = stick -> data[STICK_LEFT_UPPER_LEG];
+    self.currentAnimation -> data[frameIndex].r -> data[10] = stick -> data[STICK_LEFT_LOWER_LEG];
+    self.currentAnimation -> data[frameIndex].r -> data[11] = stick -> data[STICK_RIGHT_UPPER_LEG];
+    self.currentAnimation -> data[frameIndex].r -> data[12] = stick -> data[STICK_RIGHT_LOWER_LEG];
+}
+
+/* update stick with data from the current frame */
+void loadCurrentFrame(int32_t index) {
+    list_t *stick = self.sticks -> data[index].r;
+    stick -> data[STICK_X] = self.currentAnimation -> data[self.currentFrame].r -> data[0];
+    stick -> data[STICK_Y] = self.currentAnimation -> data[self.currentFrame].r -> data[1];
+    stick -> data[STICK_LOWER_BODY] = self.currentAnimation -> data[self.currentFrame].r -> data[2];
+    stick -> data[STICK_UPPER_BODY] = self.currentAnimation -> data[self.currentFrame].r -> data[3];
+    stick -> data[STICK_HEAD] = self.currentAnimation -> data[self.currentFrame].r -> data[4];
+    stick -> data[STICK_LEFT_UPPER_ARM] = self.currentAnimation -> data[self.currentFrame].r -> data[5];
+    stick -> data[STICK_LEFT_LOWER_ARM] = self.currentAnimation -> data[self.currentFrame].r -> data[6];
+    stick -> data[STICK_RIGHT_UPPER_ARM] = self.currentAnimation -> data[self.currentFrame].r -> data[7];
+    stick -> data[STICK_RIGHT_LOWER_ARM] = self.currentAnimation -> data[self.currentFrame].r -> data[8];
+    stick -> data[STICK_LEFT_UPPER_LEG] = self.currentAnimation -> data[self.currentFrame].r -> data[9];
+    stick -> data[STICK_LEFT_LOWER_LEG] = self.currentAnimation -> data[self.currentFrame].r -> data[10];
+    stick -> data[STICK_RIGHT_UPPER_LEG] = self.currentAnimation -> data[self.currentFrame].r -> data[11];
+    stick -> data[STICK_RIGHT_LOWER_LEG] = self.currentAnimation -> data[self.currentFrame].r -> data[12];
 }
 
 void handleUI() {
@@ -221,9 +259,12 @@ void handleUI() {
             self.frameScrollbar -> enabled = TT_ELEMENT_ENABLED;
             self.frameScrollbar -> barPercentage = 100 / (self.currentAnimation -> length / 7.8);
         }
-        if (self.frame) {
-            insertFrame(0, self.frameNumber);
-            self.frameNumber++;
+        if (self.frameButtonPressed) {
+            insertFrame(0, self.currentFrame);
+            self.currentFrame++;
+            if (self.currentFrame < self.currentAnimation -> length) {
+                loadCurrentFrame(0);
+            }
         }
     } else {
         self.onionSlider -> enabled = TT_ELEMENT_HIDE;
@@ -376,6 +417,7 @@ void renderDots(int32_t index) {
 }
 
 void renderFrames() {
+    self.mouseHoverFrame = -1;
     for (int32_t i = 0; i < self.currentAnimation -> length; i++) {
         double frameXLeft = self.frameBarX + i * 66 - self.frameScroll * (self.currentAnimation -> length - 7.5) * 0.66;
         double frameYUp = self.frameBarY;
@@ -387,10 +429,22 @@ void renderFrames() {
         if (frameXLeft > 320) {
             return;
         }
+        /* detect mouse */
+        if (turtle.mouseX >= frameXLeft && turtle.mouseX <= frameXRight && turtle.mouseY >= frameYDown && turtle.mouseY <= frameYUp) {
+            self.mouseHoverFrame = i;
+        }
         /* draw box */
+        if (self.currentFrame == i) {
+            turtlePenColor(16, 180, 190);
+            turtlePenSize(1.5);
+        } else if (self.mouseHoverFrame == i) {
+            turtlePenColor(150, 150, 150);
+            turtlePenSize(1);
+        } else {
+            turtlePenColor(0, 0, 0);
+            turtlePenSize(1);
+        }
         turtleGoto(frameXLeft, frameYUp);
-        turtlePenColor(0, 0, 0);
-        turtlePenSize(1);
         turtlePenDown();
         turtleGoto(frameXRight, frameYUp);
         turtleGoto(frameXRight, frameYDown);
@@ -413,8 +467,8 @@ void renderFrames() {
         tempStick -> data[STICK_RIGHT_LOWER_ARM].d = self.currentAnimation -> data[i].r -> data[8].d;
         tempStick -> data[STICK_LEFT_UPPER_LEG].d = self.currentAnimation -> data[i].r -> data[9].d;
         tempStick -> data[STICK_LEFT_LOWER_LEG].d = self.currentAnimation -> data[i].r -> data[10].d;
-        tempStick -> data[STICK_RIGHT_LOWER_LEG].d = self.currentAnimation -> data[i].r -> data[11].d;
-        tempStick -> data[STICK_RIGHT_UPPER_LEG].d = self.currentAnimation -> data[i].r -> data[12].d;
+        tempStick -> data[STICK_RIGHT_UPPER_LEG].d = self.currentAnimation -> data[i].r -> data[11].d;
+        tempStick -> data[STICK_RIGHT_LOWER_LEG].d = self.currentAnimation -> data[i].r -> data[12].d;
         renderStick(tempStick);
         list_free(tempStick);
     }
@@ -508,7 +562,7 @@ void generateAnimation(char *name) {
 }
 
 void mouseTick() {
-    if (turtleMouseDown() && self.mode) {
+    if (turtleMouseDown()) {
         if (self.keys[0] == 0) {
             /* first tick */
             self.keys[0] = 1;
@@ -523,6 +577,10 @@ void mouseTick() {
                     self.positionAnchorX = self.dotPositions -> data[self.limbParents -> data[self.mouseDraggingDot].i * 2].d;
                     self.positionAnchorY = self.dotPositions -> data[self.limbParents -> data[self.mouseDraggingDot].i * 2 + 1].d;
                 }
+            }
+            if (self.mode && self.mouseHoverFrame != -1) {
+                self.currentFrame = self.mouseHoverFrame;
+                loadCurrentFrame(0);
             }
         } else {
             /* mouse held */
@@ -544,7 +602,11 @@ void mouseTick() {
         }
     } else {
         self.keys[0] = 0;
-        self.mouseDraggingDot = -1;
+        if (self.mouseDraggingDot != -1) {
+            self.mouseDraggingDot = -1;
+            /* update current frame */
+            updateCurrentFrame(0, self.currentFrame);
+        }
     }
     if (turtleKeyPressed(GLFW_KEY_LEFT_CONTROL)) {
         if (self.keys[4] == 0) {
