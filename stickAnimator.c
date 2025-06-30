@@ -74,37 +74,43 @@ typedef struct {
     int32_t frameNumber; // number of frame being edited
     double frameBarX;
     double frameBarY;
+    double frameScroll;
+    tt_scrollbar_t *frameScrollbar;
 
 } stickAnimator_t;
 
 stickAnimator_t self;
 
+void createStick(list_t *stick) {
+    list_append(stick, (unitype) -280.0, 'd'); // position X
+    list_append(stick, (unitype) -50.0, 'd'); // position Y
+    list_append(stick, (unitype) 0.5, 'd'); // size
+    list_append(stick, (unitype) STICK_STYLE_OPEN_HEAD, 'i'); // style
+    list_append(stick, (unitype) 110.0, 'd'); // red
+    list_append(stick, (unitype) 16.0, 'd'); // green
+    list_append(stick, (unitype) 190.0, 'd'); // blue
+    list_append(stick, (unitype) 0.0, 'd'); // alpha
+    for (int32_t i = 0; i < 8; i++) {
+        list_append(stick, (unitype) 0.0, 'd'); // reserved
+    }
+    list_append(stick, (unitype) 5.0, 'd'); // lower body
+    list_append(stick, (unitype) 5.0, 'd'); // upper body
+    list_append(stick, (unitype) 5.0, 'd'); // head
+    list_append(stick, (unitype) -150.0, 'd'); // upper left arm
+    list_append(stick, (unitype) 170.0, 'd'); // lower left arm
+    list_append(stick, (unitype) 170.0, 'd'); // upper right arm
+    list_append(stick, (unitype) 150.0, 'd'); // lower right arm
+    list_append(stick, (unitype) -175.0, 'd'); // upper left leg
+    list_append(stick, (unitype) -170.0, 'd'); // lower left leg
+    list_append(stick, (unitype) 160.0, 'd'); // upper right leg
+    list_append(stick, (unitype) 170.0, 'd'); // lower right leg
+}
+
 void init() {
     self.sticks = list_init();
     /* create default stick */
     list_t *defaultStick = list_init();
-    list_append(defaultStick, (unitype) -280.0, 'd'); // position X
-    list_append(defaultStick, (unitype) -50.0, 'd'); // position Y
-    list_append(defaultStick, (unitype) 0.5, 'd'); // size
-    list_append(defaultStick, (unitype) STICK_STYLE_OPEN_HEAD, 'i'); // style
-    list_append(defaultStick, (unitype) 110.0, 'd'); // red
-    list_append(defaultStick, (unitype) 16.0, 'd'); // green
-    list_append(defaultStick, (unitype) 190.0, 'd'); // blue
-    list_append(defaultStick, (unitype) 0.0, 'd'); // alpha
-    for (int32_t i = 0; i < 8; i++) {
-        list_append(defaultStick, (unitype) 0.0, 'd'); // reserved
-    }
-    list_append(defaultStick, (unitype) 5.0, 'd'); // lower body
-    list_append(defaultStick, (unitype) 5.0, 'd'); // upper body
-    list_append(defaultStick, (unitype) 5.0, 'd'); // head
-    list_append(defaultStick, (unitype) -150.0, 'd'); // upper left arm
-    list_append(defaultStick, (unitype) 170.0, 'd'); // lower left arm
-    list_append(defaultStick, (unitype) 170.0, 'd'); // upper right arm
-    list_append(defaultStick, (unitype) 150.0, 'd'); // lower right arm
-    list_append(defaultStick, (unitype) -175.0, 'd'); // upper left leg
-    list_append(defaultStick, (unitype) -170.0, 'd'); // lower left leg
-    list_append(defaultStick, (unitype) 160.0, 'd'); // upper right leg
-    list_append(defaultStick, (unitype) 170.0, 'd'); // lower right leg
+    createStick(defaultStick);
     list_append(self.sticks, (unitype) defaultStick, 'r');
     /* create limb tree */
     self.limbParents = list_init();
@@ -161,6 +167,8 @@ void init() {
     self.frameNumber = 0;
     self.frameBarX = -180;
     self.frameBarY = 160;
+    self.frameScroll = 0;
+    self.frameScrollbar = scrollbarInit(&self.frameScroll, TT_SCROLLBAR_HORIZONTAL, (self.frameBarX + 315) / 2, self.frameBarY - 41, 6, 492, 90);
 }
 
 void insertFrame(int32_t index, int32_t frameIndex) {
@@ -180,14 +188,19 @@ void insertFrame(int32_t index, int32_t frameIndex) {
     list_append(constructedList, stick -> data[STICK_RIGHT_LOWER_LEG], 'd');
     list_append(constructedList, stick -> data[STICK_RIGHT_UPPER_LEG], 'd');
     list_insert(self.animations, frameIndex, (unitype) constructedList, 'r');
-    list_print(self.animations);
+    // list_print(self.animations);
 }
 
 void handleUI() {
-    turtleRectangleColor(-320, 180, -200, 140, 255, 255, 255, 0);
+    // printf("%d\n", self.frameNumber);
+    turtleRectangleColor(-320, 180, -181, 100, 255, 255, 255, 0);
     if (self.mode) {
         self.onionSlider -> enabled = TT_ELEMENT_ENABLED;
         self.frameButton -> enabled = TT_ELEMENT_ENABLED;
+        if (self.animations -> length >= 8) {
+            self.frameScrollbar -> enabled = TT_ELEMENT_ENABLED;
+            self.frameScrollbar -> barPercentage = 100 / (self.animations -> length / 7.8);
+        }
         if (self.frame) {
             insertFrame(0, self.frameNumber);
             self.frameNumber++;
@@ -195,11 +208,11 @@ void handleUI() {
     } else {
         self.onionSlider -> enabled = TT_ELEMENT_HIDE;
         self.frameButton -> enabled = TT_ELEMENT_HIDE;
+        self.frameScrollbar -> enabled = TT_ELEMENT_HIDE;
     }
 }
 
-void renderStick(int32_t index) {
-    list_t *stick = self.sticks -> data[index].r;
+void renderStick(list_t *stick) {
     double xpos = stick -> data[STICK_X].d;
     double ypos = stick -> data[STICK_Y].d;
     /* draw body */
@@ -344,10 +357,17 @@ void renderDots(int32_t index) {
 
 void renderFrames() {
     for (int32_t i = 0; i < self.animations -> length; i++) {
-        double frameXLeft = self.frameBarX + i * 66;
+        double frameXLeft = self.frameBarX + i * 66 - self.frameScroll * (self.animations -> length - 7.5) * 0.66;
         double frameYUp = self.frameBarY;
         double frameXRight = frameXLeft + 64; 
         double frameYDown = self.frameBarY - 36;
+        if (frameXRight < self.frameBarX) {
+            continue;
+        }
+        if (frameXLeft > 320) {
+            return;
+        }
+        /* draw box */
         turtleGoto(frameXLeft, frameYUp);
         turtlePenColor(0, 0, 0);
         turtlePenSize(1);
@@ -357,6 +377,26 @@ void renderFrames() {
         turtleGoto(frameXLeft, frameYDown);
         turtleGoto(frameXLeft, frameYUp);
         turtlePenUp();
+        turtleTextWriteStringf(frameXLeft + 2, frameYUp - 5, 5, 0, "%d", i);
+        /* draw stick */
+        list_t *tempStick = list_init();
+        createStick(tempStick);
+        tempStick -> data[STICK_SIZE].d = 0.05;
+        tempStick -> data[STICK_X].d = frameXLeft + ((self.animations -> data[i].r -> data[0].d + 330) / 660) * (frameXRight - frameXLeft);
+        tempStick -> data[STICK_Y].d = frameYDown + ((self.animations -> data[i].r -> data[1].d + 190) / 380) * (frameYUp - frameYDown);
+        tempStick -> data[STICK_LOWER_BODY].d = self.animations -> data[i].r -> data[2].d;
+        tempStick -> data[STICK_UPPER_BODY].d = self.animations -> data[i].r -> data[3].d;
+        tempStick -> data[STICK_HEAD].d = self.animations -> data[i].r -> data[4].d;
+        tempStick -> data[STICK_LEFT_UPPER_ARM].d = self.animations -> data[i].r -> data[5].d;
+        tempStick -> data[STICK_LEFT_LOWER_ARM].d = self.animations -> data[i].r -> data[6].d;
+        tempStick -> data[STICK_RIGHT_UPPER_ARM].d = self.animations -> data[i].r -> data[7].d;
+        tempStick -> data[STICK_RIGHT_LOWER_ARM].d = self.animations -> data[i].r -> data[8].d;
+        tempStick -> data[STICK_LEFT_UPPER_LEG].d = self.animations -> data[i].r -> data[9].d;
+        tempStick -> data[STICK_LEFT_LOWER_LEG].d = self.animations -> data[i].r -> data[10].d;
+        tempStick -> data[STICK_RIGHT_LOWER_LEG].d = self.animations -> data[i].r -> data[11].d;
+        tempStick -> data[STICK_RIGHT_UPPER_LEG].d = self.animations -> data[i].r -> data[12].d;
+        renderStick(tempStick);
+        list_free(tempStick);
     }
 }
 
@@ -539,7 +579,7 @@ int main(int argc, char *argv[]) {
         tt_setColor(TT_COLOR_TEXT);
         turtleTextWriteStringf(-310, -170, 5, 0, "%.2lf, %.2lf", turtle.mouseX, turtle.mouseY);
         renderGround();
-        // renderStick(0);
+        // renderStick(self.sticks -> data[0].r);
         if (self.mode) {
             renderDots(0);
             renderFrames();
