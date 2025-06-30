@@ -48,9 +48,25 @@ typedef struct {
         [positionX, positionY, size, style, red, green, blue, alpha, reserved, reserved, reserved, reserved, reserved, reserved, reserved, reserved
         lower body, upper body, head, left upper arm, left lower arm, right upper arm, right lower arm, left upper leg, left lower leg, right upper leg, right lower leg]
     ]
-    
+    */
+    list_t *currentAnimation;
+    /* currentAnimation format 
+    [
+        [positionX, positionY, lower body, upper body, head, left upper arm, left lower arm, right upper arm, right lower arm, left upper leg, left lower leg, right upper leg, right lower leg]
+    ]
     */
     list_t *animations;
+    /* animations format
+    [
+        [name, reserved, reserved, reserved, reserved, reserved, reserved, reserved,
+            [changeX, changeY, lower body, upper body, head, left upper arm, left lower arm, right upper arm, right lower arm, left upper leg, left lower leg, right upper leg, right lower leg
+            changeX, changeY, lower body, upper body, head, left upper arm, left lower arm, right upper arm, right lower arm, left upper leg, left lower leg, right upper leg, right lower leg
+            changeX, changeY, lower body, upper body, head, left upper arm, left lower arm, right upper arm, right lower arm, left upper leg, left lower leg, right upper leg, right lower leg
+            changeX, changeY, lower body, upper body, head, left upper arm, left lower arm, right upper arm, right lower arm, left upper leg, left lower leg, right upper leg, right lower leg
+            ]
+        ]
+    ]
+    */
     list_t *dotPositions;
     list_t *limbParents;
     list_t *limbChildren;
@@ -76,6 +92,7 @@ typedef struct {
     double frameBarY;
     double frameScroll;
     tt_scrollbar_t *frameScrollbar;
+    int32_t animationSaveIndex;
 
 } stickAnimator_t;
 
@@ -151,7 +168,7 @@ void init() {
     list_append(self.limbChildren -> data[STICK_LEFT_UPPER_LEG].r, (unitype) STICK_LEFT_LOWER_LEG, 'i');
     list_append(self.limbChildren -> data[STICK_RIGHT_UPPER_LEG].r, (unitype) STICK_RIGHT_LOWER_LEG, 'i');
 
-    self.animations = list_init();
+    self.currentAnimation = list_init();
     self.mouseHoverDot = -1;
     self.mouseDraggingDot = -1;
     self.mouseAnchorX = 0;
@@ -169,6 +186,10 @@ void init() {
     self.frameBarY = 160;
     self.frameScroll = 0;
     self.frameScrollbar = scrollbarInit(&self.frameScroll, TT_SCROLLBAR_HORIZONTAL, (self.frameBarX + 315) / 2, self.frameBarY - 41, 6, 492, 90);
+
+    /* animations */
+    self.animations = list_init();
+    self.animationSaveIndex = 0;
 }
 
 void insertFrame(int32_t index, int32_t frameIndex) {
@@ -187,8 +208,7 @@ void insertFrame(int32_t index, int32_t frameIndex) {
     list_append(constructedList, stick -> data[STICK_LEFT_LOWER_LEG], 'd');
     list_append(constructedList, stick -> data[STICK_RIGHT_LOWER_LEG], 'd');
     list_append(constructedList, stick -> data[STICK_RIGHT_UPPER_LEG], 'd');
-    list_insert(self.animations, frameIndex, (unitype) constructedList, 'r');
-    // list_print(self.animations);
+    list_insert(self.currentAnimation, frameIndex, (unitype) constructedList, 'r');
 }
 
 void handleUI() {
@@ -197,9 +217,9 @@ void handleUI() {
     if (self.mode) {
         self.onionSlider -> enabled = TT_ELEMENT_ENABLED;
         self.frameButton -> enabled = TT_ELEMENT_ENABLED;
-        if (self.animations -> length >= 8) {
+        if (self.currentAnimation -> length >= 8) {
             self.frameScrollbar -> enabled = TT_ELEMENT_ENABLED;
-            self.frameScrollbar -> barPercentage = 100 / (self.animations -> length / 7.8);
+            self.frameScrollbar -> barPercentage = 100 / (self.currentAnimation -> length / 7.8);
         }
         if (self.frame) {
             insertFrame(0, self.frameNumber);
@@ -356,8 +376,8 @@ void renderDots(int32_t index) {
 }
 
 void renderFrames() {
-    for (int32_t i = 0; i < self.animations -> length; i++) {
-        double frameXLeft = self.frameBarX + i * 66 - self.frameScroll * (self.animations -> length - 7.5) * 0.66;
+    for (int32_t i = 0; i < self.currentAnimation -> length; i++) {
+        double frameXLeft = self.frameBarX + i * 66 - self.frameScroll * (self.currentAnimation -> length - 7.5) * 0.66;
         double frameYUp = self.frameBarY;
         double frameXRight = frameXLeft + 64; 
         double frameYDown = self.frameBarY - 36;
@@ -382,19 +402,19 @@ void renderFrames() {
         list_t *tempStick = list_init();
         createStick(tempStick);
         tempStick -> data[STICK_SIZE].d = 0.05;
-        tempStick -> data[STICK_X].d = frameXLeft + ((self.animations -> data[i].r -> data[0].d + 330) / 660) * (frameXRight - frameXLeft);
-        tempStick -> data[STICK_Y].d = frameYDown + ((self.animations -> data[i].r -> data[1].d + 190) / 380) * (frameYUp - frameYDown);
-        tempStick -> data[STICK_LOWER_BODY].d = self.animations -> data[i].r -> data[2].d;
-        tempStick -> data[STICK_UPPER_BODY].d = self.animations -> data[i].r -> data[3].d;
-        tempStick -> data[STICK_HEAD].d = self.animations -> data[i].r -> data[4].d;
-        tempStick -> data[STICK_LEFT_UPPER_ARM].d = self.animations -> data[i].r -> data[5].d;
-        tempStick -> data[STICK_LEFT_LOWER_ARM].d = self.animations -> data[i].r -> data[6].d;
-        tempStick -> data[STICK_RIGHT_UPPER_ARM].d = self.animations -> data[i].r -> data[7].d;
-        tempStick -> data[STICK_RIGHT_LOWER_ARM].d = self.animations -> data[i].r -> data[8].d;
-        tempStick -> data[STICK_LEFT_UPPER_LEG].d = self.animations -> data[i].r -> data[9].d;
-        tempStick -> data[STICK_LEFT_LOWER_LEG].d = self.animations -> data[i].r -> data[10].d;
-        tempStick -> data[STICK_RIGHT_LOWER_LEG].d = self.animations -> data[i].r -> data[11].d;
-        tempStick -> data[STICK_RIGHT_UPPER_LEG].d = self.animations -> data[i].r -> data[12].d;
+        tempStick -> data[STICK_X].d = frameXLeft + ((self.currentAnimation -> data[i].r -> data[0].d + 330) / 660) * (frameXRight - frameXLeft);
+        tempStick -> data[STICK_Y].d = frameYDown + ((self.currentAnimation -> data[i].r -> data[1].d + 190) / 380) * (frameYUp - frameYDown);
+        tempStick -> data[STICK_LOWER_BODY].d = self.currentAnimation -> data[i].r -> data[2].d;
+        tempStick -> data[STICK_UPPER_BODY].d = self.currentAnimation -> data[i].r -> data[3].d;
+        tempStick -> data[STICK_HEAD].d = self.currentAnimation -> data[i].r -> data[4].d;
+        tempStick -> data[STICK_LEFT_UPPER_ARM].d = self.currentAnimation -> data[i].r -> data[5].d;
+        tempStick -> data[STICK_LEFT_LOWER_ARM].d = self.currentAnimation -> data[i].r -> data[6].d;
+        tempStick -> data[STICK_RIGHT_UPPER_ARM].d = self.currentAnimation -> data[i].r -> data[7].d;
+        tempStick -> data[STICK_RIGHT_LOWER_ARM].d = self.currentAnimation -> data[i].r -> data[8].d;
+        tempStick -> data[STICK_LEFT_UPPER_LEG].d = self.currentAnimation -> data[i].r -> data[9].d;
+        tempStick -> data[STICK_LEFT_LOWER_LEG].d = self.currentAnimation -> data[i].r -> data[10].d;
+        tempStick -> data[STICK_RIGHT_LOWER_LEG].d = self.currentAnimation -> data[i].r -> data[11].d;
+        tempStick -> data[STICK_RIGHT_UPPER_LEG].d = self.currentAnimation -> data[i].r -> data[12].d;
         renderStick(tempStick);
         list_free(tempStick);
     }
@@ -409,8 +429,40 @@ void renderGround() {
     turtlePenUp();
 }
 
-void editingMouseTick() {
-    if (turtleMouseDown()) {
+/* generate or edit animation from currentAnimation */
+void generateAnimation(char *name) {
+    if (self.animationSaveIndex < self.animations -> length) {
+        /* update existing animation */
+    } else {
+        /* create animation */
+        list_t *newAnimation = list_init();
+        list_append(newAnimation, (unitype) name, 's');
+        for (int32_t i = 0; i < 7; i++) {
+            list_append(newAnimation, (unitype) 0, 'd'); // reserved
+        }
+        list_t *animationContents = list_init();
+        list_copy(animationContents, self.currentAnimation);
+        if (self.currentAnimation -> length > 0) {
+            animationContents -> data[0].r -> data[0].d = 0;
+            animationContents -> data[0].r -> data[1].d = 0;
+        }
+        for (int32_t i = 0; i < animationContents -> length; i++) {
+            if (i > 0) {
+                animationContents -> data[i].r -> data[0].d = self.currentAnimation -> data[i].r -> data[0].d - self.currentAnimation -> data[i - 1].r -> data[0].d;
+                animationContents -> data[i].r -> data[1].d = self.currentAnimation -> data[i].r -> data[1].d - self.currentAnimation -> data[i - 1].r -> data[1].d;
+            }
+            list_append(newAnimation, animationContents -> data[i], 'r');
+        }
+        list_append(self.animations, (unitype) newAnimation, 'r');
+    }
+    // FILE *fp = fopen(name, "w");
+    // list_fprint_emb(fp, self.animations -> data[self.animationSaveIndex].r);
+    // fclose(fp);
+    list_print(self.animations -> data[self.animationSaveIndex].r);
+}
+
+void mouseTick() {
+    if (turtleMouseDown() && self.mode) {
         if (self.keys[0] == 0) {
             /* first tick */
             self.keys[0] = 1;
@@ -448,6 +500,32 @@ void editingMouseTick() {
         self.keys[0] = 0;
         self.mouseDraggingDot = -1;
     }
+    if (turtleKeyPressed(GLFW_KEY_LEFT_CONTROL)) {
+        if (self.keys[4] == 0) {
+            self.keys[4] = 1;
+        }
+    } else {
+        self.keys[4] = 0;
+    }
+    if (turtleKeyPressed(GLFW_KEY_S)) {
+        if (self.keys[5] == 0) {
+            self.keys[5] = 1;
+            if (self.keys[4]) {
+                /* save */
+                if (strcmp(osToolsFileDialog.selectedFilename, "null") == 0) {
+                    if (osToolsFileDialogPrompt(1, "") != -1) {
+                        printf("Saved to: %s\n", osToolsFileDialog.selectedFilename);
+                        generateAnimation(osToolsFileDialog.selectedFilename);
+                    }
+                } else {
+                    printf("Saved to: %s\n", osToolsFileDialog.selectedFilename);
+                    generateAnimation(osToolsFileDialog.selectedFilename);
+                }
+            }
+        }
+    } else {
+        self.keys[5] = 0;
+    }
 }
 
 void parseRibbonOutput() {
@@ -456,19 +534,24 @@ void parseRibbonOutput() {
         if (ribbonRender.output[1] == 0) { // File
             if (ribbonRender.output[2] == 1) { // New
                 printf("New\n");
+                strcpy(osToolsFileDialog.selectedFilename, "null");
+                self.animationSaveIndex++;
             }
             if (ribbonRender.output[2] == 2) { // Save
                 if (strcmp(osToolsFileDialog.selectedFilename, "null") == 0) {
                     if (osToolsFileDialogPrompt(1, "") != -1) {
                         printf("Saved to: %s\n", osToolsFileDialog.selectedFilename);
+                        generateAnimation(osToolsFileDialog.selectedFilename);
                     }
                 } else {
                     printf("Saved to: %s\n", osToolsFileDialog.selectedFilename);
+                    generateAnimation(osToolsFileDialog.selectedFilename);
                 }
             }
             if (ribbonRender.output[2] == 3) { // Save As...
                 if (osToolsFileDialogPrompt(1, "") != -1) {
                     printf("Saved to: %s\n", osToolsFileDialog.selectedFilename);
+                    generateAnimation(osToolsFileDialog.selectedFilename);
                 }
             }
             if (ribbonRender.output[2] == 4) { // Open
@@ -564,7 +647,7 @@ int main(int argc, char *argv[]) {
     popupInit("include/popupConfig.txt", -60, -20, 60, 20);
     /* initialise osTools */
     osToolsInit(argv[0], window); // must include argv[0] to get executableFilepath, must include GLFW window
-    osToolsFileDialogAddExtension("txt"); // add txt to extension restrictions
+    osToolsFileDialogAddExtension("sta"); // add sta to extension restrictions
 
     init();
 
@@ -583,9 +666,9 @@ int main(int argc, char *argv[]) {
         if (self.mode) {
             renderDots(0);
             renderFrames();
-            editingMouseTick();
         }
         handleUI();
+        mouseTick();
         turtleToolsUpdate(); // update turtleTools
         parseRibbonOutput(); // user defined function to use ribbon
         parsePopupOutput(window); // user defined function to use popup
