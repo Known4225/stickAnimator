@@ -103,17 +103,30 @@ typedef struct {
     double frameBarY;
     double frameScroll;
     tt_scrollbar_t *frameScrollbar;
+
+    /* animation */
     int32_t animationSaveIndex;
     double animationBarX;
     double animationBarY;
     double animationScroll;
     tt_scrollbar_t *animationScrollbar;
+
+    /* playing animation */
+    int32_t playingAnimationFrame;
+    clock_t timeOfLastFrame;
+    int8_t playButtonPressed;
+    int8_t play;
+    tt_button_t *playButton;
+    int8_t loop;
+    tt_switch_t *loopSwitch;
+    double framesPerSecond;
+    tt_slider_t *framesPerSecondSlider;
 } stickAnimator_t;
 
 stickAnimator_t self;
 
 void createStick(list_t *stick);
-void insertFrame(int32_t index, int32_t frameIndex);
+void insertFrame(int32_t stickIndex, int32_t frameIndex);
 void generateAnimation(char *filename, int32_t animationIndex);
 
 void init() {
@@ -174,14 +187,22 @@ void init() {
     self.mode = 1;
     self.modeSwitch = switchInit("Mode", &self.mode, -305, 152, 6);
     self.onionNumber = 0;
-    self.onionSlider = sliderInit("Onion", &self.onionNumber, TT_SLIDER_HORIZONTAL, TT_SLIDER_ALIGN_CENTER, -220, 152, 6, 40, 0, 3, 1);
+    self.onionSlider = sliderInit("Onion", &self.onionNumber, TT_SLIDER_HORIZONTAL, TT_SLIDER_ALIGN_CENTER, -290, 113, 6, 40, 0, 3, 1);
     self.frameButtonPressed = 0;
-    self.frameButton = buttonInit("Add Frame", &self.frameButtonPressed, -270, 152, 6);
+    self.frameButton = buttonInit("Add Frame", &self.frameButtonPressed, -290, 135, 6);
     self.currentFrame = 0;
     self.frameBarX = -180;
     self.frameBarY = 160;
     self.frameScroll = 0;
     self.frameScrollbar = scrollbarInit(&self.frameScroll, TT_SCROLLBAR_HORIZONTAL, (self.frameBarX + 315) / 2, self.frameBarY - 41, 6, 492, 90);
+    self.playButtonPressed = 0;
+    self.play = 0;
+    self.playButton = buttonInit("Play", &self.playButtonPressed, -280, 152, 6);
+    self.loop = 1;
+    self.loopSwitch = switchInit("Loop", &self.loop, -260, 152, 6);
+    self.loopSwitch -> style = TT_SWITCH_STYLE_CHECKBOX;
+    self.framesPerSecond = 12;
+    self.framesPerSecondSlider = sliderInit("Frames/s", &self.framesPerSecond, TT_SLIDER_HORIZONTAL, TT_SLIDER_ALIGN_CENTER, -210, 152, 6, 40, 1, 30, 1);
 
     /* animations */
     self.animations = list_init();
@@ -219,9 +240,9 @@ void createStick(list_t *stick) {
     list_append(stick, (unitype) 170.0, 'd'); // lower right leg
 }
 
-/* insert frame to currentAnimation */
-void insertFrame(int32_t index, int32_t frameIndex) {
-    list_t *stick = self.sticks -> data[index].r;
+/* insert frame to currentAnimation (from stick data) */
+void insertFrame(int32_t stickIndex, int32_t frameIndex) {
+    list_t *stick = self.sticks -> data[stickIndex].r;
     list_t *constructedList = list_init();
     list_append(constructedList, stick -> data[STICK_X], 'd');
     list_append(constructedList, stick -> data[STICK_Y], 'd');
@@ -239,9 +260,9 @@ void insertFrame(int32_t index, int32_t frameIndex) {
     list_insert(self.currentAnimation, frameIndex, (unitype) constructedList, 'r');
 }
 
-/* sync stick with currentAnimation */
-void updateCurrentFrame(int32_t index, int32_t frameIndex) {
-    list_t *stick = self.sticks -> data[index].r;
+/* update currentAnimation with data from stick */
+void updateCurrentFrame(int32_t stickIndex, int32_t frameIndex) {
+    list_t *stick = self.sticks -> data[stickIndex].r;
     self.currentAnimation -> data[frameIndex].r -> data[0] = stick -> data[STICK_X];
     self.currentAnimation -> data[frameIndex].r -> data[1] = stick -> data[STICK_Y];
     self.currentAnimation -> data[frameIndex].r -> data[2] = stick -> data[STICK_LOWER_BODY];
@@ -258,8 +279,8 @@ void updateCurrentFrame(int32_t index, int32_t frameIndex) {
 }
 
 /* update stick with data from the current frame */
-void loadCurrentFrame(int32_t index) {
-    list_t *stick = self.sticks -> data[index].r;
+void loadCurrentFrame(int32_t stickIndex) {
+    list_t *stick = self.sticks -> data[stickIndex].r;
     stick -> data[STICK_X] = self.currentAnimation -> data[self.currentFrame].r -> data[0];
     stick -> data[STICK_Y] = self.currentAnimation -> data[self.currentFrame].r -> data[1];
     stick -> data[STICK_LOWER_BODY] = self.currentAnimation -> data[self.currentFrame].r -> data[2];
@@ -275,7 +296,7 @@ void loadCurrentFrame(int32_t index) {
     stick -> data[STICK_RIGHT_LOWER_LEG] = self.currentAnimation -> data[self.currentFrame].r -> data[12];
 }
 
-/* update currentAnimation with animationIndex */
+/* update currentAnimation with data from animations */
 void loadCurrentAnimation(int32_t animationIndex) {
     list_clear(self.currentAnimation);
     double xpos = self.animations -> data[animationIndex].r -> data[3].d;
@@ -301,307 +322,63 @@ void loadCurrentAnimation(int32_t animationIndex) {
     }
 }
 
-void handleUI() {
-    // printf("%d\n", self.frameNumber);
-    turtleRectangleColor(-320, 180, self.frameBarX - 1, 100, 255, 255, 255, 0);
-    if (self.mode) {
-        self.onionSlider -> enabled = TT_ELEMENT_ENABLED;
-        self.frameButton -> enabled = TT_ELEMENT_ENABLED;
-        if (self.currentAnimation -> length >= 8) {
-            self.frameScrollbar -> enabled = TT_ELEMENT_ENABLED;
-            self.frameScrollbar -> barPercentage = 100 / (self.currentAnimation -> length / 7.8);
-        } else {
-            self.frameScrollbar -> enabled = TT_ELEMENT_HIDE;
+/* update animations with currentAnimation */
+void generateAnimation(char *filename, int32_t animationIndex) {
+    list_t *newAnimation = list_init();
+    list_append(newAnimation, (unitype) filename, 's'); // filepath
+    int32_t nameIndex = strlen(filename) - 1;
+    int32_t dotIndex = -1;
+    while (nameIndex >= 0) {
+        if (filename[nameIndex] == '.') {
+            dotIndex = nameIndex;
+            filename[nameIndex] = '\0';
         }
-        if (self.frameButtonPressed) {
-            insertFrame(0, self.currentFrame);
-            self.currentFrame++;
-            if (self.currentFrame < self.currentAnimation -> length) {
-                loadCurrentFrame(0);
-            }
-        }
-    } else {
-        self.onionSlider -> enabled = TT_ELEMENT_HIDE;
-        self.frameButton -> enabled = TT_ELEMENT_HIDE;
-        self.frameScrollbar -> enabled = TT_ELEMENT_HIDE;
-    }
-    if (self.animations -> length >= 8) {
-        self.animationScrollbar -> enabled = TT_ELEMENT_ENABLED;
-        self.frameScrollbar -> barPercentage = 100 / (self.currentAnimation -> length / 6.8);
-    } else {
-        self.animationScrollbar -> enabled = TT_ELEMENT_HIDE;
-    }
-}
-
-void renderStick(list_t *stick) {
-    double xpos = stick -> data[STICK_X].d;
-    double ypos = stick -> data[STICK_Y].d;
-    /* draw body */
-    turtlePenColorAlpha(stick -> data[STICK_RED].d, stick -> data[STICK_GREEN].d, stick -> data[STICK_BLUE].d, stick -> data[STICK_ALPHA].d);
-    turtlePenSize(stick -> data[STICK_SIZE].d * 9);
-    turtleGoto(xpos, ypos);
-    turtlePenDown();
-    turtleGoto(turtle.x + sin(stick -> data[STICK_LOWER_BODY].d / 57.2958) * STICK_SIZE_LOWER_BODY * stick -> data[STICK_SIZE].d, turtle.y + cos(stick -> data[STICK_LOWER_BODY].d / 57.2958) * STICK_SIZE_LOWER_BODY * stick -> data[STICK_SIZE].d);
-    turtleGoto(turtle.x + sin(stick -> data[STICK_UPPER_BODY].d / 57.2958) * STICK_SIZE_UPPER_BODY * stick -> data[STICK_SIZE].d, turtle.y + cos(stick -> data[STICK_UPPER_BODY].d / 57.2958) * STICK_SIZE_UPPER_BODY * stick -> data[STICK_SIZE].d);
-    double savedX = turtle.x;
-    double savedY = turtle.y;
-    /* draw arms */
-    turtleGoto(turtle.x + sin(stick -> data[STICK_LEFT_UPPER_ARM].d / 57.2958) * STICK_SIZE_UPPER_ARM * stick -> data[STICK_SIZE].d, turtle.y + cos(stick -> data[STICK_LEFT_UPPER_ARM].d / 57.2958) * STICK_SIZE_UPPER_ARM * stick -> data[STICK_SIZE].d);
-    turtleGoto(turtle.x + sin(stick -> data[STICK_LEFT_LOWER_ARM].d / 57.2958) * STICK_SIZE_LOWER_ARM * stick -> data[STICK_SIZE].d, turtle.y + cos(stick -> data[STICK_LEFT_LOWER_ARM].d / 57.2958) * STICK_SIZE_LOWER_ARM * stick -> data[STICK_SIZE].d);
-    turtlePenUp();
-    turtleGoto(savedX, savedY);
-    turtlePenDown();
-    turtleGoto(turtle.x + sin(stick -> data[STICK_RIGHT_UPPER_ARM].d / 57.2958) * STICK_SIZE_UPPER_ARM * stick -> data[STICK_SIZE].d, turtle.y + cos(stick -> data[STICK_RIGHT_UPPER_ARM].d / 57.2958) * STICK_SIZE_UPPER_ARM * stick -> data[STICK_SIZE].d);
-    turtleGoto(turtle.x + sin(stick -> data[STICK_RIGHT_LOWER_ARM].d / 57.2958) * STICK_SIZE_LOWER_ARM * stick -> data[STICK_SIZE].d, turtle.y + cos(stick -> data[STICK_RIGHT_LOWER_ARM].d / 57.2958) * STICK_SIZE_LOWER_ARM * stick -> data[STICK_SIZE].d);
-    turtlePenUp();
-
-    /* draw legs */
-    turtleGoto(xpos, ypos);
-    turtlePenDown();
-    turtleGoto(turtle.x + sin(stick -> data[STICK_LEFT_UPPER_LEG].d / 57.2958) * STICK_SIZE_UPPER_LEG * stick -> data[STICK_SIZE].d, turtle.y + cos(stick -> data[STICK_LEFT_UPPER_LEG].d / 57.2958) * STICK_SIZE_UPPER_LEG * stick -> data[STICK_SIZE].d);
-    turtleGoto(turtle.x + sin(stick -> data[STICK_LEFT_LOWER_LEG].d / 57.2958) * STICK_SIZE_LOWER_LEG * stick -> data[STICK_SIZE].d, turtle.y + cos(stick -> data[STICK_LEFT_LOWER_LEG].d / 57.2958) * STICK_SIZE_LOWER_LEG * stick -> data[STICK_SIZE].d);
-    turtlePenUp();
-    turtleGoto(xpos, ypos);
-    turtlePenDown();
-    turtleGoto(turtle.x + sin(stick -> data[STICK_RIGHT_UPPER_LEG].d / 57.2958) * STICK_SIZE_UPPER_LEG * stick -> data[STICK_SIZE].d, turtle.y + cos(stick -> data[STICK_RIGHT_UPPER_LEG].d / 57.2958) * STICK_SIZE_UPPER_LEG * stick -> data[STICK_SIZE].d);
-    turtleGoto(turtle.x + sin(stick -> data[STICK_RIGHT_LOWER_LEG].d / 57.2958) * STICK_SIZE_LOWER_LEG * stick -> data[STICK_SIZE].d, turtle.y + cos(stick -> data[STICK_RIGHT_LOWER_LEG].d / 57.2958) * STICK_SIZE_LOWER_LEG * stick -> data[STICK_SIZE].d);
-    turtlePenUp();
-
-    /* draw head */
-    if (stick -> data[STICK_STYLE].i == STICK_STYLE_OPEN_HEAD) {
-        // turtlePenSize(STICK_SIZE_HEAD_RADIUS / 4 * stick -> data[STICK_SIZE].d);
-        // savedX += sin(stick -> data[STICK_HEAD].d / 57.2958) * STICK_SIZE_HEAD * stick -> data[STICK_SIZE].d;
-        // savedY += cos(stick -> data[STICK_HEAD].d / 57.2958) * STICK_SIZE_HEAD * stick -> data[STICK_SIZE].d;
-        // turtleGoto(savedX, savedY + STICK_SIZE_HEAD_RADIUS * stick -> data[STICK_SIZE].d);
-        // turtlePenDown();
-        // double prez = turtle.circleprez * 4 * log(2.71 + turtle.pensize);
-        // for (double i = 0; i < prez + 1; i++) {
-        //     turtleGoto(savedX + sin((360 / prez * i) / 57.2958) * STICK_SIZE_HEAD_RADIUS * stick -> data[STICK_SIZE].d, savedY + cos((360 / prez * i) / 57.2958) * STICK_SIZE_HEAD_RADIUS * stick -> data[STICK_SIZE].d);
-        // }
-        // turtlePenUp();
-        turtlePenSize(STICK_SIZE_HEAD_RADIUS * 2 * stick -> data[STICK_SIZE].d);
-        turtleGoto(savedX + sin(stick -> data[STICK_HEAD].d / 57.2958) * STICK_SIZE_HEAD * stick -> data[STICK_SIZE].d, savedY + cos(stick -> data[STICK_HEAD].d / 57.2958) * STICK_SIZE_HEAD * stick -> data[STICK_SIZE].d);
-        turtlePenDown();
-        turtlePenUp();
-        turtlePenColor(255, 255, 255);
-        turtlePenSize(turtle.pensize * 2 * 0.8);
-        turtlePenDown();
-        turtlePenUp();
-    } else if (stick -> data[STICK_STYLE].i == STICK_STYLE_CLOSED_HEAD) {
-        turtlePenSize(STICK_SIZE_HEAD_RADIUS * 2 * stick -> data[STICK_SIZE].d);
-        turtleGoto(savedX + sin(stick -> data[STICK_HEAD].d / 57.2958) * STICK_SIZE_HEAD * stick -> data[STICK_SIZE].d, savedY + cos(stick -> data[STICK_HEAD].d / 57.2958) * STICK_SIZE_HEAD * stick -> data[STICK_SIZE].d);
-        turtlePenDown();
-        turtlePenUp();
-    }
-}
-
-void checkMouse(list_t *stick, int32_t index, int32_t dotIndex) {
-    self.dotPositions -> data[dotIndex * 2].d = turtle.x;
-    self.dotPositions -> data[dotIndex * 2 + 1].d = turtle.y;
-    if (turtle.mouseX > turtle.x - stick -> data[STICK_SIZE].d * 4 && turtle.mouseX < turtle.x + stick -> data[STICK_SIZE].d * 4 && turtle.mouseY > turtle.y - stick -> data[STICK_SIZE].d * 4 && turtle.mouseY < turtle.y + stick -> data[STICK_SIZE].d * 4) {
-        if (self.mouseHoverDot == -1 || self.mouseHoverDistance > (turtle.mouseX - turtle.x) * (turtle.mouseX - turtle.x) + (turtle.mouseY - turtle.y) * (turtle.mouseY - turtle.y)) {
-            self.mouseHoverDot = dotIndex;
-            self.mouseHoverDistance = (turtle.mouseX - turtle.x) * (turtle.mouseX - turtle.x) + (turtle.mouseY - turtle.y) * (turtle.mouseY - turtle.y);
-            self.mouseStickIndex = index;
-        }
-    }
-}
-
-void renderDots(int32_t index) {
-    self.mouseHoverDot = -1;
-    list_t *stick = self.sticks -> data[index].r;
-    double xpos = stick -> data[STICK_X].d;
-    double ypos = stick -> data[STICK_Y].d;
-    /* draw body */
-    turtlePenColor(225, 70, 0);
-    turtlePenSize(stick -> data[STICK_SIZE].d * 6);
-    turtleGoto(xpos, ypos);
-    turtlePenDown();
-    turtlePenUp();
-    checkMouse(stick, index, 0);
-    turtlePenColor(0, 0, 0);
-    turtleGoto(turtle.x + sin(stick -> data[STICK_LOWER_BODY].d / 57.2958) * STICK_SIZE_LOWER_BODY * stick -> data[STICK_SIZE].d, turtle.y + cos(stick -> data[STICK_LOWER_BODY].d / 57.2958) * STICK_SIZE_LOWER_BODY * stick -> data[STICK_SIZE].d);
-    turtlePenDown();
-    turtlePenUp();
-    checkMouse(stick, index, STICK_LOWER_BODY);
-    turtleGoto(turtle.x + sin(stick -> data[STICK_UPPER_BODY].d / 57.2958) * STICK_SIZE_UPPER_BODY * stick -> data[STICK_SIZE].d, turtle.y + cos(stick -> data[STICK_UPPER_BODY].d / 57.2958) * STICK_SIZE_UPPER_BODY * stick -> data[STICK_SIZE].d);
-    turtlePenDown();
-    turtlePenUp();
-    checkMouse(stick, index, STICK_UPPER_BODY);
-    double savedX = turtle.x;
-    double savedY = turtle.y;
-    /* draw arms */
-    turtleGoto(turtle.x + sin(stick -> data[STICK_LEFT_UPPER_ARM].d / 57.2958) * STICK_SIZE_UPPER_ARM * stick -> data[STICK_SIZE].d, turtle.y + cos(stick -> data[STICK_LEFT_UPPER_ARM].d / 57.2958) * STICK_SIZE_UPPER_ARM * stick -> data[STICK_SIZE].d);
-    turtlePenDown();
-    turtlePenUp();
-    checkMouse(stick, index, STICK_LEFT_UPPER_ARM);
-    turtleGoto(turtle.x + sin(stick -> data[STICK_LEFT_LOWER_ARM].d / 57.2958) * STICK_SIZE_LOWER_ARM * stick -> data[STICK_SIZE].d, turtle.y + cos(stick -> data[STICK_LEFT_LOWER_ARM].d / 57.2958) * STICK_SIZE_LOWER_ARM * stick -> data[STICK_SIZE].d);
-    turtlePenDown();
-    turtlePenUp();
-    checkMouse(stick, index, STICK_LEFT_LOWER_ARM);
-    turtleGoto(savedX, savedY);
-    turtleGoto(turtle.x + sin(stick -> data[STICK_RIGHT_UPPER_ARM].d / 57.2958) * STICK_SIZE_UPPER_ARM * stick -> data[STICK_SIZE].d, turtle.y + cos(stick -> data[STICK_RIGHT_UPPER_ARM].d / 57.2958) * STICK_SIZE_UPPER_ARM * stick -> data[STICK_SIZE].d);
-    turtlePenDown();
-    turtlePenUp();
-    checkMouse(stick, index, STICK_RIGHT_UPPER_ARM);
-    turtleGoto(turtle.x + sin(stick -> data[STICK_RIGHT_LOWER_ARM].d / 57.2958) * STICK_SIZE_LOWER_ARM * stick -> data[STICK_SIZE].d, turtle.y + cos(stick -> data[STICK_RIGHT_LOWER_ARM].d / 57.2958) * STICK_SIZE_LOWER_ARM * stick -> data[STICK_SIZE].d);
-    turtlePenDown();
-    turtlePenUp();
-    checkMouse(stick, index, STICK_RIGHT_LOWER_ARM);
-
-    /* draw legs */
-    turtleGoto(xpos, ypos);
-    turtleGoto(turtle.x + sin(stick -> data[STICK_LEFT_UPPER_LEG].d / 57.2958) * STICK_SIZE_UPPER_LEG * stick -> data[STICK_SIZE].d, turtle.y + cos(stick -> data[STICK_LEFT_UPPER_LEG].d / 57.2958) * STICK_SIZE_UPPER_LEG * stick -> data[STICK_SIZE].d);
-    turtlePenDown();
-    turtlePenUp();
-    checkMouse(stick, index, STICK_LEFT_UPPER_LEG);
-    turtleGoto(turtle.x + sin(stick -> data[STICK_LEFT_LOWER_LEG].d / 57.2958) * STICK_SIZE_LOWER_LEG * stick -> data[STICK_SIZE].d, turtle.y + cos(stick -> data[STICK_LEFT_LOWER_LEG].d / 57.2958) * STICK_SIZE_LOWER_LEG * stick -> data[STICK_SIZE].d);
-    turtlePenDown();
-    turtlePenUp();
-    checkMouse(stick, index, STICK_LEFT_LOWER_LEG);
-    turtleGoto(xpos, ypos);
-    turtleGoto(turtle.x + sin(stick -> data[STICK_RIGHT_UPPER_LEG].d / 57.2958) * STICK_SIZE_UPPER_LEG * stick -> data[STICK_SIZE].d, turtle.y + cos(stick -> data[STICK_RIGHT_UPPER_LEG].d / 57.2958) * STICK_SIZE_UPPER_LEG * stick -> data[STICK_SIZE].d);
-    turtlePenDown();
-    turtlePenUp();
-    checkMouse(stick, index, STICK_RIGHT_UPPER_LEG);
-    turtleGoto(turtle.x + sin(stick -> data[STICK_RIGHT_LOWER_LEG].d / 57.2958) * STICK_SIZE_LOWER_LEG * stick -> data[STICK_SIZE].d, turtle.y + cos(stick -> data[STICK_RIGHT_LOWER_LEG].d / 57.2958) * STICK_SIZE_LOWER_LEG * stick -> data[STICK_SIZE].d);
-    turtlePenDown();
-    turtlePenUp();
-    checkMouse(stick, index, STICK_RIGHT_LOWER_LEG);
-
-    /* draw head */
-    turtleGoto(savedX + sin(stick -> data[STICK_HEAD].d / 57.2958) * STICK_SIZE_HEAD * stick -> data[STICK_SIZE].d, savedY + cos(stick -> data[STICK_HEAD].d / 57.2958) * STICK_SIZE_HEAD * stick -> data[STICK_SIZE].d);
-    turtlePenDown();
-    turtlePenUp();
-    checkMouse(stick, index, STICK_HEAD);
-}
-
-void renderFrames() {
-    self.mouseHoverFrame = -1;
-    for (int32_t i = 0; i < self.currentAnimation -> length; i++) {
-        double frameXLeft = self.frameBarX + i * 66 - self.frameScroll * (self.currentAnimation -> length - 7.5) * 0.66;
-        double frameYUp = self.frameBarY;
-        double frameXRight = frameXLeft + 64; 
-        double frameYDown = frameYUp - 36;
-        if (frameXRight < self.frameBarX) {
-            continue;
-        }
-        if (frameXLeft > 320) {
-            return;
-        }
-        /* detect mouse */
-        if (turtle.mouseX >= frameXLeft && turtle.mouseX <= frameXRight && turtle.mouseY >= frameYDown && turtle.mouseY <= frameYUp) {
-            self.mouseHoverFrame = i;
-        }
-        /* draw box */
-        if (self.currentFrame == i) {
-            turtlePenColor(16, 180, 190);
-            turtlePenSize(1.5);
-        } else if (self.mouseHoverFrame == i) {
-            turtlePenColor(150, 150, 150);
-            turtlePenSize(1);
-        } else {
-            turtlePenColor(0, 0, 0);
-            turtlePenSize(1);
-        }
-        turtleGoto(frameXLeft, frameYUp);
-        turtlePenDown();
-        turtleGoto(frameXRight, frameYUp);
-        turtleGoto(frameXRight, frameYDown);
-        turtleGoto(frameXLeft, frameYDown);
-        turtleGoto(frameXLeft, frameYUp);
-        turtlePenUp();
-        turtleTextWriteStringf(frameXLeft + 2, frameYUp - 5, 5, 0, "%d", i + 1);
-        /* draw stick */
-        list_t *tempStick = list_init();
-        createStick(tempStick);
-        tempStick -> data[STICK_SIZE].d = 0.05;
-        tempStick -> data[STICK_X].d = frameXLeft + ((self.currentAnimation -> data[i].r -> data[0].d + 330) / 660) * (frameXRight - frameXLeft);
-        tempStick -> data[STICK_Y].d = frameYDown + ((self.currentAnimation -> data[i].r -> data[1].d + 190) / 380) * (frameYUp - frameYDown);
-        tempStick -> data[STICK_LOWER_BODY].d = self.currentAnimation -> data[i].r -> data[2].d;
-        tempStick -> data[STICK_UPPER_BODY].d = self.currentAnimation -> data[i].r -> data[3].d;
-        tempStick -> data[STICK_HEAD].d = self.currentAnimation -> data[i].r -> data[4].d;
-        tempStick -> data[STICK_LEFT_UPPER_ARM].d = self.currentAnimation -> data[i].r -> data[5].d;
-        tempStick -> data[STICK_LEFT_LOWER_ARM].d = self.currentAnimation -> data[i].r -> data[6].d;
-        tempStick -> data[STICK_RIGHT_UPPER_ARM].d = self.currentAnimation -> data[i].r -> data[7].d;
-        tempStick -> data[STICK_RIGHT_LOWER_ARM].d = self.currentAnimation -> data[i].r -> data[8].d;
-        tempStick -> data[STICK_LEFT_UPPER_LEG].d = self.currentAnimation -> data[i].r -> data[9].d;
-        tempStick -> data[STICK_LEFT_LOWER_LEG].d = self.currentAnimation -> data[i].r -> data[10].d;
-        tempStick -> data[STICK_RIGHT_UPPER_LEG].d = self.currentAnimation -> data[i].r -> data[11].d;
-        tempStick -> data[STICK_RIGHT_LOWER_LEG].d = self.currentAnimation -> data[i].r -> data[12].d;
-        renderStick(tempStick);
-        list_free(tempStick);
-    }
-}
-
-void renderGround() {
-    turtlePenShape("square");
-    turtlePenColor(0, 0, 0);
-    turtlePenSize(4);
-    turtleGoto(-320, -86);
-    turtlePenDown();
-    turtleGoto(240, turtle.y);
-    turtlePenUp();
-    turtlePenShape("circle");
-}
-
-void renderAnimations() {
-    self.mouseHoverAnimation = -1;
-    for (int32_t i = 0; i < self.animations -> length; i++) {
-        double animationXLeft = self.animationBarX;
-        double animationYUp = self.animationBarY - i * 38 + self.animationScroll * (self.animations -> length - 7.5) * 0.38;
-        double animationXRight = animationXLeft + 64;
-        double animationYDown = animationYUp - 36;
-        if (animationYDown > self.animationBarY) {
-            continue;
-        }
-        if (animationYUp < -180) {
+        if (filename[nameIndex] == '\\' || filename[nameIndex] == '/') {
             break;
         }
-        /* detect mouse */
-        if (turtle.mouseX >= animationXLeft && turtle.mouseX <= animationXRight && turtle.mouseY >= animationYDown && turtle.mouseY <= animationYUp) {
-            self.mouseHoverAnimation = i;
-        }
-        /* draw box */
-        if (self.animationSaveIndex == i) {
-            turtlePenColor(16, 180, 190);
-            turtlePenSize(1.5);
-        } else if (self.mouseHoverAnimation == i) {
-            turtlePenColor(150, 150, 150);
-            turtlePenSize(1);
-        } else {
-            turtlePenColor(0, 0, 0);
-            turtlePenSize(1);
-        }
-        turtleGoto(animationXLeft, animationYUp);
-        turtlePenDown();
-        turtleGoto(animationXRight, animationYUp);
-        turtleGoto(animationXRight, animationYDown);
-        turtleGoto(animationXLeft, animationYDown);
-        turtleGoto(animationXLeft, animationYUp);
-        turtlePenUp();
-        turtleTextWriteStringf(animationXLeft + 2, animationYUp - 5, 5, 0, "%s", self.animations -> data[i].r -> data[1].s);
-        /* draw thumbnail */
-        list_t *tempStick = list_init();
-        createStick(tempStick);
-        tempStick -> data[STICK_SIZE].d = 0.05;
-        tempStick -> data[STICK_X].d = animationXLeft + ((self.animations -> data[i].r -> data[3].d + 330) / 660) * (animationXRight - animationXLeft);
-        tempStick -> data[STICK_Y].d = animationYDown + ((self.animations -> data[i].r -> data[4].d + 190) / 380) * (animationYUp - animationYDown);
-        tempStick -> data[STICK_LOWER_BODY].d = self.animations -> data[i].r -> data[8].r -> data[2].d;
-        tempStick -> data[STICK_UPPER_BODY].d = self.animations -> data[i].r -> data[8].r -> data[3].d;
-        tempStick -> data[STICK_HEAD].d = self.animations -> data[i].r -> data[8].r -> data[4].d;
-        tempStick -> data[STICK_LEFT_UPPER_ARM].d = self.animations -> data[i].r -> data[8].r -> data[5].d;
-        tempStick -> data[STICK_LEFT_LOWER_ARM].d = self.animations -> data[i].r -> data[8].r -> data[6].d;
-        tempStick -> data[STICK_RIGHT_UPPER_ARM].d = self.animations -> data[i].r -> data[8].r -> data[7].d;
-        tempStick -> data[STICK_RIGHT_LOWER_ARM].d = self.animations -> data[i].r -> data[8].r -> data[8].d;
-        tempStick -> data[STICK_LEFT_UPPER_LEG].d = self.animations -> data[i].r -> data[8].r -> data[9].d;
-        tempStick -> data[STICK_LEFT_LOWER_LEG].d = self.animations -> data[i].r -> data[8].r -> data[10].d;
-        tempStick -> data[STICK_RIGHT_UPPER_LEG].d = self.animations -> data[i].r -> data[8].r -> data[11].d;
-        tempStick -> data[STICK_RIGHT_LOWER_LEG].d = self.animations -> data[i].r -> data[8].r -> data[12].d;
-        renderStick(tempStick);
-        list_free(tempStick);
+        nameIndex--;
     }
-    turtleRectangleColor(self.animationBarX - 10, self.animationBarY + 1, 320, 180, 255, 255, 255, 0);
+    list_append(newAnimation, (unitype) (filename + nameIndex + 1), 's'); // name
+    if (dotIndex != -1) {
+        filename[dotIndex] = '.';
+    }
+    list_append(newAnimation, (unitype) self.currentAnimation -> length, 'i'); // number of frames
+    if (self.currentAnimation -> length > 0) {
+        list_append(newAnimation, self.currentAnimation -> data[0].r -> data[0], 'd'); // startingX
+        list_append(newAnimation, self.currentAnimation -> data[0].r -> data[1], 'd'); // startingY
+    } else {
+        list_append(newAnimation, (unitype) 0, 'd');
+        list_append(newAnimation, (unitype) 0, 'd');
+    }
+    for (int32_t i = 0; i < 3; i++) {
+        list_append(newAnimation, (unitype) 0, 'd'); // reserved
+    }
+    list_t *animationContents = list_init();
+    list_copy(animationContents, self.currentAnimation);
+    if (self.currentAnimation -> length > 0) {
+        animationContents -> data[0].r -> data[0].d = 0;
+        animationContents -> data[0].r -> data[1].d = 0;
+    }
+    for (int32_t i = 0; i < animationContents -> length; i++) {
+        if (i > 0) {
+            animationContents -> data[i].r -> data[0].d = self.currentAnimation -> data[i].r -> data[0].d - self.currentAnimation -> data[i - 1].r -> data[0].d;
+            animationContents -> data[i].r -> data[1].d = self.currentAnimation -> data[i].r -> data[1].d - self.currentAnimation -> data[i - 1].r -> data[1].d;
+        }
+        list_append(newAnimation, animationContents -> data[i], 'r');
+    }
+    if (animationIndex < self.animations -> length) {
+        /* update existing animation */
+        list_delete(self.animations, animationIndex);
+        list_insert(self.animations, animationIndex, (unitype) newAnimation, 'r');
+    } else {
+        /* create animation */
+        list_append(self.animations, (unitype) newAnimation, 'r');
+    }
+    if (strcmp(filename, "null") != 0) {
+        FILE *fp = fopen(filename, "w");
+        list_fprint_emb(fp, self.animations -> data[animationIndex].r);
+        fclose(fp);
+    }
 }
 
 /* import animation from file */
@@ -672,59 +449,341 @@ void importAnimation(char *filename) {
     list_append(self.animations, (unitype) outputList, 'r');
 }
 
-/* generate or edit animation from currentAnimation */
-void generateAnimation(char *filename, int32_t animationIndex) {
-    list_t *newAnimation = list_init();
-    list_append(newAnimation, (unitype) filename, 's'); // filepath
-    int32_t nameIndex = strlen(filename) - 1;
-    while (nameIndex >= 0) {
-        if (filename[nameIndex] == '.') {
-            filename[nameIndex] = '\0';
+/* show, hide, and process UI elements */
+void handleUI() {
+    turtleRectangleColor(-320, 180, self.frameBarX - 1, 100, turtle.bgr, turtle.bgg, turtle.bgb, 0);
+    if (self.mode) {
+        self.onionSlider -> enabled = TT_ELEMENT_ENABLED;
+        self.frameButton -> enabled = TT_ELEMENT_ENABLED;
+        if (self.currentAnimation -> length >= 8) {
+            self.frameScrollbar -> enabled = TT_ELEMENT_ENABLED;
+            self.frameScrollbar -> barPercentage = 100 / (self.currentAnimation -> length / 7.8);
+        } else {
+            self.frameScrollbar -> enabled = TT_ELEMENT_HIDE;
         }
-        if (filename[nameIndex] == '\\' || filename[nameIndex] == '/') {
+        if (self.frameButtonPressed) {
+            insertFrame(0, self.currentFrame);
+            self.currentFrame++;
+            if (self.currentFrame < self.currentAnimation -> length) {
+                loadCurrentFrame(0);
+            }
+        }
+    } else {
+        self.onionSlider -> enabled = TT_ELEMENT_HIDE;
+        self.frameButton -> enabled = TT_ELEMENT_HIDE;
+        self.frameScrollbar -> enabled = TT_ELEMENT_HIDE;
+    }
+    if (self.animations -> length >= 8) {
+        self.animationScrollbar -> enabled = TT_ELEMENT_ENABLED;
+        self.frameScrollbar -> barPercentage = 100 / (self.currentAnimation -> length / 6.8);
+    } else {
+        self.animationScrollbar -> enabled = TT_ELEMENT_HIDE;
+    }
+    if (self.playButtonPressed) {
+        self.play = !self.play;
+        self.currentFrame = 0;
+        self.timeOfLastFrame = clock();
+    }
+    if (self.play) {
+        strcpy(self.playButton -> label, "Stop");
+        clock_t timeNow = clock();
+        if ((double) (timeNow - self.timeOfLastFrame) / CLOCKS_PER_SEC >= (1.0 / self.framesPerSecond)) {
+            self.timeOfLastFrame = timeNow;
+            self.currentFrame++;
+            if (self.currentFrame == self.currentAnimation -> length) {
+                if (self.loop) {
+                    self.currentFrame = 0;
+                } else {
+                    self.play = 0;
+                    self.currentFrame = self.currentAnimation -> length - 1;
+                }
+            }
+            loadCurrentFrame(0);
+            /* extra catch to end animation early */
+            if (self.currentFrame == self.currentAnimation -> length - 1 && self.loop == 0) {
+                self.play = 0;
+            }
+        }
+    } else {
+        strcpy(self.playButton -> label, "Play");
+    }
+}
+
+/* render the ground */
+void renderGround() {
+    turtlePenShape("square");
+    turtlePenColor(0, 0, 0);
+    turtlePenSize(4);
+    turtleGoto(-320, -86);
+    turtlePenDown();
+    turtleGoto(240, turtle.y);
+    turtlePenUp();
+    turtlePenShape("circle");
+}
+
+/* render a stick */
+void renderStick(list_t *stick) {
+    double xpos = stick -> data[STICK_X].d;
+    double ypos = stick -> data[STICK_Y].d;
+    /* draw body */
+    turtlePenColorAlpha(stick -> data[STICK_RED].d, stick -> data[STICK_GREEN].d, stick -> data[STICK_BLUE].d, stick -> data[STICK_ALPHA].d);
+    turtlePenSize(stick -> data[STICK_SIZE].d * 9);
+    turtleGoto(xpos, ypos);
+    turtlePenDown();
+    turtleGoto(turtle.x + sin(stick -> data[STICK_LOWER_BODY].d / 57.2958) * STICK_SIZE_LOWER_BODY * stick -> data[STICK_SIZE].d, turtle.y + cos(stick -> data[STICK_LOWER_BODY].d / 57.2958) * STICK_SIZE_LOWER_BODY * stick -> data[STICK_SIZE].d);
+    turtleGoto(turtle.x + sin(stick -> data[STICK_UPPER_BODY].d / 57.2958) * STICK_SIZE_UPPER_BODY * stick -> data[STICK_SIZE].d, turtle.y + cos(stick -> data[STICK_UPPER_BODY].d / 57.2958) * STICK_SIZE_UPPER_BODY * stick -> data[STICK_SIZE].d);
+    double savedX = turtle.x;
+    double savedY = turtle.y;
+    /* draw arms */
+    turtleGoto(turtle.x + sin(stick -> data[STICK_LEFT_UPPER_ARM].d / 57.2958) * STICK_SIZE_UPPER_ARM * stick -> data[STICK_SIZE].d, turtle.y + cos(stick -> data[STICK_LEFT_UPPER_ARM].d / 57.2958) * STICK_SIZE_UPPER_ARM * stick -> data[STICK_SIZE].d);
+    turtleGoto(turtle.x + sin(stick -> data[STICK_LEFT_LOWER_ARM].d / 57.2958) * STICK_SIZE_LOWER_ARM * stick -> data[STICK_SIZE].d, turtle.y + cos(stick -> data[STICK_LEFT_LOWER_ARM].d / 57.2958) * STICK_SIZE_LOWER_ARM * stick -> data[STICK_SIZE].d);
+    turtlePenUp();
+    turtleGoto(savedX, savedY);
+    turtlePenDown();
+    turtleGoto(turtle.x + sin(stick -> data[STICK_RIGHT_UPPER_ARM].d / 57.2958) * STICK_SIZE_UPPER_ARM * stick -> data[STICK_SIZE].d, turtle.y + cos(stick -> data[STICK_RIGHT_UPPER_ARM].d / 57.2958) * STICK_SIZE_UPPER_ARM * stick -> data[STICK_SIZE].d);
+    turtleGoto(turtle.x + sin(stick -> data[STICK_RIGHT_LOWER_ARM].d / 57.2958) * STICK_SIZE_LOWER_ARM * stick -> data[STICK_SIZE].d, turtle.y + cos(stick -> data[STICK_RIGHT_LOWER_ARM].d / 57.2958) * STICK_SIZE_LOWER_ARM * stick -> data[STICK_SIZE].d);
+    turtlePenUp();
+
+    /* draw legs */
+    turtleGoto(xpos, ypos);
+    turtlePenDown();
+    turtleGoto(turtle.x + sin(stick -> data[STICK_LEFT_UPPER_LEG].d / 57.2958) * STICK_SIZE_UPPER_LEG * stick -> data[STICK_SIZE].d, turtle.y + cos(stick -> data[STICK_LEFT_UPPER_LEG].d / 57.2958) * STICK_SIZE_UPPER_LEG * stick -> data[STICK_SIZE].d);
+    turtleGoto(turtle.x + sin(stick -> data[STICK_LEFT_LOWER_LEG].d / 57.2958) * STICK_SIZE_LOWER_LEG * stick -> data[STICK_SIZE].d, turtle.y + cos(stick -> data[STICK_LEFT_LOWER_LEG].d / 57.2958) * STICK_SIZE_LOWER_LEG * stick -> data[STICK_SIZE].d);
+    turtlePenUp();
+    turtleGoto(xpos, ypos);
+    turtlePenDown();
+    turtleGoto(turtle.x + sin(stick -> data[STICK_RIGHT_UPPER_LEG].d / 57.2958) * STICK_SIZE_UPPER_LEG * stick -> data[STICK_SIZE].d, turtle.y + cos(stick -> data[STICK_RIGHT_UPPER_LEG].d / 57.2958) * STICK_SIZE_UPPER_LEG * stick -> data[STICK_SIZE].d);
+    turtleGoto(turtle.x + sin(stick -> data[STICK_RIGHT_LOWER_LEG].d / 57.2958) * STICK_SIZE_LOWER_LEG * stick -> data[STICK_SIZE].d, turtle.y + cos(stick -> data[STICK_RIGHT_LOWER_LEG].d / 57.2958) * STICK_SIZE_LOWER_LEG * stick -> data[STICK_SIZE].d);
+    turtlePenUp();
+
+    /* draw head */
+    if (stick -> data[STICK_STYLE].i == STICK_STYLE_OPEN_HEAD) {
+        // turtlePenSize(STICK_SIZE_HEAD_RADIUS / 4 * stick -> data[STICK_SIZE].d);
+        // savedX += sin(stick -> data[STICK_HEAD].d / 57.2958) * STICK_SIZE_HEAD * stick -> data[STICK_SIZE].d;
+        // savedY += cos(stick -> data[STICK_HEAD].d / 57.2958) * STICK_SIZE_HEAD * stick -> data[STICK_SIZE].d;
+        // turtleGoto(savedX, savedY + STICK_SIZE_HEAD_RADIUS * stick -> data[STICK_SIZE].d);
+        // turtlePenDown();
+        // double prez = turtle.circleprez * 4 * log(2.71 + turtle.pensize);
+        // for (double i = 0; i < prez + 1; i++) {
+        //     turtleGoto(savedX + sin((360 / prez * i) / 57.2958) * STICK_SIZE_HEAD_RADIUS * stick -> data[STICK_SIZE].d, savedY + cos((360 / prez * i) / 57.2958) * STICK_SIZE_HEAD_RADIUS * stick -> data[STICK_SIZE].d);
+        // }
+        // turtlePenUp();
+        turtlePenSize(STICK_SIZE_HEAD_RADIUS * 2 * stick -> data[STICK_SIZE].d);
+        turtleGoto(savedX + sin(stick -> data[STICK_HEAD].d / 57.2958) * STICK_SIZE_HEAD * stick -> data[STICK_SIZE].d, savedY + cos(stick -> data[STICK_HEAD].d / 57.2958) * STICK_SIZE_HEAD * stick -> data[STICK_SIZE].d);
+        turtlePenDown();
+        turtlePenUp();
+        turtlePenColor(turtle.bgr, turtle.bgg, turtle.bgb);
+        turtlePenSize(turtle.pensize * 2 * 0.8);
+        turtlePenDown();
+        turtlePenUp();
+    } else if (stick -> data[STICK_STYLE].i == STICK_STYLE_CLOSED_HEAD) {
+        turtlePenSize(STICK_SIZE_HEAD_RADIUS * 2 * stick -> data[STICK_SIZE].d);
+        turtleGoto(savedX + sin(stick -> data[STICK_HEAD].d / 57.2958) * STICK_SIZE_HEAD * stick -> data[STICK_SIZE].d, savedY + cos(stick -> data[STICK_HEAD].d / 57.2958) * STICK_SIZE_HEAD * stick -> data[STICK_SIZE].d);
+        turtlePenDown();
+        turtlePenUp();
+    }
+}
+
+/* check if mouse hovers over a dot */
+void checkMouse(list_t *stick, int32_t index, int32_t dotIndex) {
+    self.dotPositions -> data[dotIndex * 2].d = turtle.x;
+    self.dotPositions -> data[dotIndex * 2 + 1].d = turtle.y;
+    if (turtle.mouseX > turtle.x - stick -> data[STICK_SIZE].d * 4 && turtle.mouseX < turtle.x + stick -> data[STICK_SIZE].d * 4 && turtle.mouseY > turtle.y - stick -> data[STICK_SIZE].d * 4 && turtle.mouseY < turtle.y + stick -> data[STICK_SIZE].d * 4) {
+        if (self.mouseHoverDot == -1 || self.mouseHoverDistance > (turtle.mouseX - turtle.x) * (turtle.mouseX - turtle.x) + (turtle.mouseY - turtle.y) * (turtle.mouseY - turtle.y)) {
+            self.mouseHoverDot = dotIndex;
+            self.mouseHoverDistance = (turtle.mouseX - turtle.x) * (turtle.mouseX - turtle.x) + (turtle.mouseY - turtle.y) * (turtle.mouseY - turtle.y);
+            self.mouseStickIndex = index;
+        }
+    }
+}
+
+/* render dots on a stick */
+void renderDots(int32_t index) {
+    self.mouseHoverDot = -1;
+    list_t *stick = self.sticks -> data[index].r;
+    double xpos = stick -> data[STICK_X].d;
+    double ypos = stick -> data[STICK_Y].d;
+    /* draw body */
+    turtlePenColor(225, 70, 0);
+    turtlePenSize(stick -> data[STICK_SIZE].d * 6);
+    turtleGoto(xpos, ypos);
+    turtlePenDown();
+    turtlePenUp();
+    checkMouse(stick, index, 0);
+    turtlePenColor(0, 0, 0);
+    turtleGoto(turtle.x + sin(stick -> data[STICK_LOWER_BODY].d / 57.2958) * STICK_SIZE_LOWER_BODY * stick -> data[STICK_SIZE].d, turtle.y + cos(stick -> data[STICK_LOWER_BODY].d / 57.2958) * STICK_SIZE_LOWER_BODY * stick -> data[STICK_SIZE].d);
+    turtlePenDown();
+    turtlePenUp();
+    checkMouse(stick, index, STICK_LOWER_BODY);
+    turtleGoto(turtle.x + sin(stick -> data[STICK_UPPER_BODY].d / 57.2958) * STICK_SIZE_UPPER_BODY * stick -> data[STICK_SIZE].d, turtle.y + cos(stick -> data[STICK_UPPER_BODY].d / 57.2958) * STICK_SIZE_UPPER_BODY * stick -> data[STICK_SIZE].d);
+    turtlePenDown();
+    turtlePenUp();
+    checkMouse(stick, index, STICK_UPPER_BODY);
+    double savedX = turtle.x;
+    double savedY = turtle.y;
+    /* draw arms */
+    turtleGoto(turtle.x + sin(stick -> data[STICK_LEFT_UPPER_ARM].d / 57.2958) * STICK_SIZE_UPPER_ARM * stick -> data[STICK_SIZE].d, turtle.y + cos(stick -> data[STICK_LEFT_UPPER_ARM].d / 57.2958) * STICK_SIZE_UPPER_ARM * stick -> data[STICK_SIZE].d);
+    turtlePenDown();
+    turtlePenUp();
+    checkMouse(stick, index, STICK_LEFT_UPPER_ARM);
+    turtleGoto(turtle.x + sin(stick -> data[STICK_LEFT_LOWER_ARM].d / 57.2958) * STICK_SIZE_LOWER_ARM * stick -> data[STICK_SIZE].d, turtle.y + cos(stick -> data[STICK_LEFT_LOWER_ARM].d / 57.2958) * STICK_SIZE_LOWER_ARM * stick -> data[STICK_SIZE].d);
+    turtlePenDown();
+    turtlePenUp();
+    checkMouse(stick, index, STICK_LEFT_LOWER_ARM);
+    turtleGoto(savedX, savedY);
+    turtleGoto(turtle.x + sin(stick -> data[STICK_RIGHT_UPPER_ARM].d / 57.2958) * STICK_SIZE_UPPER_ARM * stick -> data[STICK_SIZE].d, turtle.y + cos(stick -> data[STICK_RIGHT_UPPER_ARM].d / 57.2958) * STICK_SIZE_UPPER_ARM * stick -> data[STICK_SIZE].d);
+    turtlePenDown();
+    turtlePenUp();
+    checkMouse(stick, index, STICK_RIGHT_UPPER_ARM);
+    turtleGoto(turtle.x + sin(stick -> data[STICK_RIGHT_LOWER_ARM].d / 57.2958) * STICK_SIZE_LOWER_ARM * stick -> data[STICK_SIZE].d, turtle.y + cos(stick -> data[STICK_RIGHT_LOWER_ARM].d / 57.2958) * STICK_SIZE_LOWER_ARM * stick -> data[STICK_SIZE].d);
+    turtlePenDown();
+    turtlePenUp();
+    checkMouse(stick, index, STICK_RIGHT_LOWER_ARM);
+
+    /* draw legs */
+    turtleGoto(xpos, ypos);
+    turtleGoto(turtle.x + sin(stick -> data[STICK_LEFT_UPPER_LEG].d / 57.2958) * STICK_SIZE_UPPER_LEG * stick -> data[STICK_SIZE].d, turtle.y + cos(stick -> data[STICK_LEFT_UPPER_LEG].d / 57.2958) * STICK_SIZE_UPPER_LEG * stick -> data[STICK_SIZE].d);
+    turtlePenDown();
+    turtlePenUp();
+    checkMouse(stick, index, STICK_LEFT_UPPER_LEG);
+    turtleGoto(turtle.x + sin(stick -> data[STICK_LEFT_LOWER_LEG].d / 57.2958) * STICK_SIZE_LOWER_LEG * stick -> data[STICK_SIZE].d, turtle.y + cos(stick -> data[STICK_LEFT_LOWER_LEG].d / 57.2958) * STICK_SIZE_LOWER_LEG * stick -> data[STICK_SIZE].d);
+    turtlePenDown();
+    turtlePenUp();
+    checkMouse(stick, index, STICK_LEFT_LOWER_LEG);
+    turtleGoto(xpos, ypos);
+    turtleGoto(turtle.x + sin(stick -> data[STICK_RIGHT_UPPER_LEG].d / 57.2958) * STICK_SIZE_UPPER_LEG * stick -> data[STICK_SIZE].d, turtle.y + cos(stick -> data[STICK_RIGHT_UPPER_LEG].d / 57.2958) * STICK_SIZE_UPPER_LEG * stick -> data[STICK_SIZE].d);
+    turtlePenDown();
+    turtlePenUp();
+    checkMouse(stick, index, STICK_RIGHT_UPPER_LEG);
+    turtleGoto(turtle.x + sin(stick -> data[STICK_RIGHT_LOWER_LEG].d / 57.2958) * STICK_SIZE_LOWER_LEG * stick -> data[STICK_SIZE].d, turtle.y + cos(stick -> data[STICK_RIGHT_LOWER_LEG].d / 57.2958) * STICK_SIZE_LOWER_LEG * stick -> data[STICK_SIZE].d);
+    turtlePenDown();
+    turtlePenUp();
+    checkMouse(stick, index, STICK_RIGHT_LOWER_LEG);
+
+    /* draw head */
+    turtleGoto(savedX + sin(stick -> data[STICK_HEAD].d / 57.2958) * STICK_SIZE_HEAD * stick -> data[STICK_SIZE].d, savedY + cos(stick -> data[STICK_HEAD].d / 57.2958) * STICK_SIZE_HEAD * stick -> data[STICK_SIZE].d);
+    turtlePenDown();
+    turtlePenUp();
+    checkMouse(stick, index, STICK_HEAD);
+}
+
+/* render frame topbar */
+void renderFrames() {
+    self.mouseHoverFrame = -1;
+    for (int32_t i = 0; i < self.currentAnimation -> length; i++) {
+        double frameXLeft = self.frameBarX + i * 66 - self.frameScroll * (self.currentAnimation -> length - 7.5) * 0.66;
+        double frameYUp = self.frameBarY;
+        double frameXRight = frameXLeft + 64; 
+        double frameYDown = frameYUp - 36;
+        if (frameXRight < self.frameBarX) {
+            continue;
+        }
+        if (frameXLeft > 320) {
+            return;
+        }
+        /* detect mouse */
+        if (turtle.mouseX >= frameXLeft && turtle.mouseX <= frameXRight && turtle.mouseY >= frameYDown && turtle.mouseY <= frameYUp) {
+            self.mouseHoverFrame = i;
+        }
+        /* draw box */
+        if (self.currentFrame == i) {
+            turtlePenColor(16, 180, 190);
+            turtlePenSize(1.5);
+        } else if (self.mouseHoverFrame == i) {
+            turtlePenColor(150, 150, 150);
+            turtlePenSize(1);
+        } else {
+            turtlePenColor(0, 0, 0);
+            turtlePenSize(1);
+        }
+        turtleGoto(frameXLeft, frameYUp);
+        turtlePenDown();
+        turtleGoto(frameXRight, frameYUp);
+        turtleGoto(frameXRight, frameYDown);
+        turtleGoto(frameXLeft, frameYDown);
+        turtleGoto(frameXLeft, frameYUp);
+        turtlePenUp();
+        turtleTextWriteStringf(frameXLeft + 2, frameYUp - 5, 5, 0, "%d", i + 1);
+        /* draw stick */
+        list_t *tempStick = list_init();
+        createStick(tempStick);
+        tempStick -> data[STICK_SIZE].d = 0.05;
+        tempStick -> data[STICK_X].d = frameXLeft + ((self.currentAnimation -> data[i].r -> data[0].d + 330) / 660) * (frameXRight - frameXLeft);
+        tempStick -> data[STICK_Y].d = frameYDown + ((self.currentAnimation -> data[i].r -> data[1].d + 190) / 380) * (frameYUp - frameYDown);
+        tempStick -> data[STICK_LOWER_BODY].d = self.currentAnimation -> data[i].r -> data[2].d;
+        tempStick -> data[STICK_UPPER_BODY].d = self.currentAnimation -> data[i].r -> data[3].d;
+        tempStick -> data[STICK_HEAD].d = self.currentAnimation -> data[i].r -> data[4].d;
+        tempStick -> data[STICK_LEFT_UPPER_ARM].d = self.currentAnimation -> data[i].r -> data[5].d;
+        tempStick -> data[STICK_LEFT_LOWER_ARM].d = self.currentAnimation -> data[i].r -> data[6].d;
+        tempStick -> data[STICK_RIGHT_UPPER_ARM].d = self.currentAnimation -> data[i].r -> data[7].d;
+        tempStick -> data[STICK_RIGHT_LOWER_ARM].d = self.currentAnimation -> data[i].r -> data[8].d;
+        tempStick -> data[STICK_LEFT_UPPER_LEG].d = self.currentAnimation -> data[i].r -> data[9].d;
+        tempStick -> data[STICK_LEFT_LOWER_LEG].d = self.currentAnimation -> data[i].r -> data[10].d;
+        tempStick -> data[STICK_RIGHT_UPPER_LEG].d = self.currentAnimation -> data[i].r -> data[11].d;
+        tempStick -> data[STICK_RIGHT_LOWER_LEG].d = self.currentAnimation -> data[i].r -> data[12].d;
+        renderStick(tempStick);
+        list_free(tempStick);
+    }
+}
+
+/* render animation sidebar */
+void renderAnimations() {
+    self.mouseHoverAnimation = -1;
+    for (int32_t i = 0; i < self.animations -> length; i++) {
+        double animationXLeft = self.animationBarX;
+        double animationYUp = self.animationBarY - i * 38 + self.animationScroll * (self.animations -> length - 7.5) * 0.38;
+        double animationXRight = animationXLeft + 64;
+        double animationYDown = animationYUp - 36;
+        if (animationYDown > self.animationBarY) {
+            continue;
+        }
+        if (animationYUp < -180) {
             break;
         }
-        nameIndex--;
-    }
-    list_append(newAnimation, (unitype) (filename + nameIndex + 1), 's'); // name
-    list_append(newAnimation, (unitype) self.currentAnimation -> length, 'i'); // number of frames
-    if (self.currentAnimation -> length > 0) {
-        list_append(newAnimation, self.currentAnimation -> data[0].r -> data[0], 'd'); // startingX
-        list_append(newAnimation, self.currentAnimation -> data[0].r -> data[1], 'd'); // startingY
-    } else {
-        list_append(newAnimation, (unitype) 0, 'd');
-        list_append(newAnimation, (unitype) 0, 'd');
-    }
-    for (int32_t i = 0; i < 3; i++) {
-        list_append(newAnimation, (unitype) 0, 'd'); // reserved
-    }
-    list_t *animationContents = list_init();
-    list_copy(animationContents, self.currentAnimation);
-    if (self.currentAnimation -> length > 0) {
-        animationContents -> data[0].r -> data[0].d = 0;
-        animationContents -> data[0].r -> data[1].d = 0;
-    }
-    for (int32_t i = 0; i < animationContents -> length; i++) {
-        if (i > 0) {
-            animationContents -> data[i].r -> data[0].d = self.currentAnimation -> data[i].r -> data[0].d - self.currentAnimation -> data[i - 1].r -> data[0].d;
-            animationContents -> data[i].r -> data[1].d = self.currentAnimation -> data[i].r -> data[1].d - self.currentAnimation -> data[i - 1].r -> data[1].d;
+        /* detect mouse */
+        if (turtle.mouseX >= animationXLeft && turtle.mouseX <= animationXRight && turtle.mouseY >= animationYDown && turtle.mouseY <= animationYUp) {
+            self.mouseHoverAnimation = i;
         }
-        list_append(newAnimation, animationContents -> data[i], 'r');
+        /* draw box */
+        if (self.animationSaveIndex == i) {
+            turtlePenColor(16, 180, 190);
+            turtlePenSize(1.5);
+        } else if (self.mouseHoverAnimation == i) {
+            turtlePenColor(150, 150, 150);
+            turtlePenSize(1);
+        } else {
+            turtlePenColor(0, 0, 0);
+            turtlePenSize(1);
+        }
+        turtleGoto(animationXLeft, animationYUp);
+        turtlePenDown();
+        turtleGoto(animationXRight, animationYUp);
+        turtleGoto(animationXRight, animationYDown);
+        turtleGoto(animationXLeft, animationYDown);
+        turtleGoto(animationXLeft, animationYUp);
+        turtlePenUp();
+        turtleTextWriteStringf(animationXLeft + 2, animationYUp - 5, 5, 0, "%s", self.animations -> data[i].r -> data[1].s);
+        /* draw thumbnail */
+        list_t *tempStick = list_init();
+        createStick(tempStick);
+        tempStick -> data[STICK_SIZE].d = 0.05;
+        tempStick -> data[STICK_X].d = animationXLeft + ((self.animations -> data[i].r -> data[3].d + 330) / 660) * (animationXRight - animationXLeft);
+        tempStick -> data[STICK_Y].d = animationYDown + ((self.animations -> data[i].r -> data[4].d + 190) / 380) * (animationYUp - animationYDown);
+        tempStick -> data[STICK_LOWER_BODY].d = self.animations -> data[i].r -> data[8].r -> data[2].d;
+        tempStick -> data[STICK_UPPER_BODY].d = self.animations -> data[i].r -> data[8].r -> data[3].d;
+        tempStick -> data[STICK_HEAD].d = self.animations -> data[i].r -> data[8].r -> data[4].d;
+        tempStick -> data[STICK_LEFT_UPPER_ARM].d = self.animations -> data[i].r -> data[8].r -> data[5].d;
+        tempStick -> data[STICK_LEFT_LOWER_ARM].d = self.animations -> data[i].r -> data[8].r -> data[6].d;
+        tempStick -> data[STICK_RIGHT_UPPER_ARM].d = self.animations -> data[i].r -> data[8].r -> data[7].d;
+        tempStick -> data[STICK_RIGHT_LOWER_ARM].d = self.animations -> data[i].r -> data[8].r -> data[8].d;
+        tempStick -> data[STICK_LEFT_UPPER_LEG].d = self.animations -> data[i].r -> data[8].r -> data[9].d;
+        tempStick -> data[STICK_LEFT_LOWER_LEG].d = self.animations -> data[i].r -> data[8].r -> data[10].d;
+        tempStick -> data[STICK_RIGHT_UPPER_LEG].d = self.animations -> data[i].r -> data[8].r -> data[11].d;
+        tempStick -> data[STICK_RIGHT_LOWER_LEG].d = self.animations -> data[i].r -> data[8].r -> data[12].d;
+        renderStick(tempStick);
+        list_free(tempStick);
     }
-    if (animationIndex < self.animations -> length) {
-        /* update existing animation */
-        list_delete(self.animations, animationIndex);
-        list_insert(self.animations, animationIndex, (unitype) newAnimation, 'r');
-    } else {
-        /* create animation */
-        list_append(self.animations, (unitype) newAnimation, 'r');
-    }
-    if (strcmp(filename, "null") != 0) {
-        FILE *fp = fopen(filename, "w");
-        list_fprint_emb(fp, self.animations -> data[animationIndex].r);
-        fclose(fp);
-    }
-    // list_print(self.animations);
+    turtleRectangleColor(self.animationBarX - 10, self.animationBarY + 1, 320, 180, turtle.bgr, turtle.bgg, turtle.bgb, 0);
 }
 
 void mouseTick() {
@@ -893,7 +952,6 @@ void parseRibbonOutput() {
         }
         if (ribbonRender.output[1] == 2) { // View
             if (ribbonRender.output[2] == 1) { // Change theme
-                printf("Change theme\n");
                 if (tt_theme == TT_THEME_DARK) {
                     turtleBgColor(36, 30, 32);
                     turtleToolsSetTheme(TT_THEME_COLT);
@@ -973,7 +1031,7 @@ int main(int argc, char *argv[]) {
         tt_setColor(TT_COLOR_TEXT);
         turtleTextWriteStringf(-310, -170, 5, 0, "%.2lf, %.2lf", turtle.mouseX, turtle.mouseY);
         renderGround();
-        renderStick(self.sticks -> data[0].r);
+        // renderStick(self.sticks -> data[0].r);
         renderAnimations();
         if (self.mode) {
             renderDots(0);

@@ -54,6 +54,9 @@ typedef struct {
     double peng; // pen green (0 to 1)
     double penb; // pen blue (0 to 1)
     double pena; // pen alpha (0 to 1)
+    double bgr; // background color red
+    double bgg; // background color green
+    double bgb; // background color blue
     double currentColor[4]; // for reducing API color calls
 
     /* 3D variables */
@@ -202,6 +205,9 @@ void turtleInit(GLFWwindow* window, int32_t minX, int32_t minY, int32_t maxX, in
     turtle.peng = 0.0;
     turtle.penb = 0.0;
     turtle.pena = 0.0;
+    turtle.bgr = 255.0;
+    turtle.bgg = 255.0;
+    turtle.bgb = 255.0;
     for (uint8_t i = 0; i < 3; i++) {
         turtle.currentColor[i] = 0.0;
     }
@@ -243,6 +249,9 @@ void turtleGetMouseCoords() {
 
 /* set the background color */
 void turtleBgColor(double r, double g, double b) {
+    turtle.bgr = r;
+    turtle.bgg = g;
+    turtle.bgb = b;
     glClearColor(r / 255, g / 255, b / 255, 0.0);
 }
 
