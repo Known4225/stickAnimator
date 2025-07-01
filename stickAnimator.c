@@ -384,11 +384,11 @@ void generateAnimation(char *filename, int32_t animationIndex) {
 }
 
 /* import animation from file */
-void importAnimation(char *filename) {
+int32_t importAnimation(char *filename) {
     uint32_t fileSize;
     char *fileData = (char *) osToolsMapFile(filename, &fileSize);
     if (fileData == NULL) {
-        return;
+        return -1;
     }
     list_t *outputList = list_init();
     int32_t left = 1;
@@ -425,7 +425,7 @@ void importAnimation(char *filename) {
             } else if (extractionIndex == 1) {
                 /* string */
                 list_append(outputList, (unitype) (fileData + left), 's');
-            } else if (extractionIndex == 2) {
+            } else if (extractionIndex == 2 || extractionIndex == 5) {
                 /* int */
                 int32_t readInt;
                 sscanf(fileData + left, "%d", &readInt);
@@ -449,6 +449,7 @@ void importAnimation(char *filename) {
     }
     osToolsUnmapFile((uint8_t *) fileData);
     list_append(self.animations, (unitype) outputList, 'r');
+    return 0;
 }
 
 /* show, hide, and process UI elements */
@@ -923,12 +924,16 @@ void parseRibbonOutput() {
             }
             if (ribbonRender.output[2] == 4) { // Open
                 if (osToolsFileDialogPrompt(0, "") != -1) {
-                    importAnimation(osToolsFileDialog.selectedFilename);
-                    self.animationSaveIndex = self.animations -> length - 1;
-                    loadCurrentAnimation(self.animationSaveIndex);
-                    self.currentFrame = 0;
-                    loadCurrentFrame(0);
-                    printf("Loaded data from: %s\n", osToolsFileDialog.selectedFilename);
+                    /* save this animation */
+                    generateAnimation(self.animations -> data[self.animationSaveIndex].r -> data[0].s, self.animationSaveIndex);
+                    /* import animation */
+                    if (importAnimation(osToolsFileDialog.selectedFilename) != -1) {
+                        self.animationSaveIndex = self.animations -> length - 1;
+                        loadCurrentAnimation(self.animationSaveIndex);
+                        self.currentFrame = 0;
+                        loadCurrentFrame(0);
+                        printf("Loaded data from: %s\n", osToolsFileDialog.selectedFilename);
+                    }
                 }
             }
         }
@@ -1021,6 +1026,18 @@ int main(int argc, char *argv[]) {
     osToolsFileDialogAddExtension("sta"); // add sta to extension restrictions
 
     init();
+
+    if (argc > 1) {
+        list_delete(self.animations, 0);
+        if (importAnimation(argv[1]) != -1) {
+            strcpy(osToolsFileDialog.selectedFilename, argv[1]);
+            self.animationSaveIndex = self.animations -> length - 1;
+            loadCurrentAnimation(self.animationSaveIndex);
+            self.currentFrame = 0;
+            loadCurrentFrame(0);
+            printf("Loaded data from: %s\n", osToolsFileDialog.selectedFilename);
+        }
+    }
 
     uint32_t tps = 120; // ticks per second (locked to fps in this case)
     uint64_t tick = 0; // count number of ticks since application started
