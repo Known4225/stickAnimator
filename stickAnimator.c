@@ -301,6 +301,7 @@ void loadCurrentAnimation(int32_t animationIndex) {
     list_clear(self.currentAnimation);
     double xpos = self.animations -> data[animationIndex].r -> data[3].d;
     double ypos = self.animations -> data[animationIndex].r -> data[4].d;
+    self.framesPerSecond = self.animations -> data[animationIndex].r -> data[5].i;
     for (int32_t i = 0; i < self.animations -> data[animationIndex].r -> length - 8; i++) {
         list_t *constructedList = list_init();
         xpos += self.animations -> data[animationIndex].r -> data[8 + i].r -> data[0].d;
@@ -350,7 +351,8 @@ void generateAnimation(char *filename, int32_t animationIndex) {
         list_append(newAnimation, (unitype) 0, 'd');
         list_append(newAnimation, (unitype) 0, 'd');
     }
-    for (int32_t i = 0; i < 3; i++) {
+    list_append(newAnimation, (unitype) (int32_t) round(self.framesPerSecond), 'i');
+    for (int32_t i = 0; i < 2; i++) {
         list_append(newAnimation, (unitype) 0, 'd'); // reserved
     }
     list_t *animationContents = list_init();
