@@ -67,7 +67,7 @@ typedef struct {
     list_t *animations;
     /* animations format
     [
-        [filepath, name, number of frames, startingX, startingY, reserved, reserved, reserved,
+        [filepath, name, number of frames, startingX, startingY, frames per second, reserved, reserved,
             [changeX, changeY, lower body, upper body, head, left upper arm, left lower arm, right upper arm, right lower arm, left upper leg, left lower leg, right upper leg, right lower leg
             changeX, changeY, lower body, upper body, head, left upper arm, left lower arm, right upper arm, right lower arm, left upper leg, left lower leg, right upper leg, right lower leg
             changeX, changeY, lower body, upper body, head, left upper arm, left lower arm, right upper arm, right lower arm, left upper leg, left lower leg, right upper leg, right lower leg
@@ -125,6 +125,11 @@ typedef struct {
     tt_button_t *deleteFrameButton;
     int8_t deleteAnimationButtonPressed;
     tt_button_t *deleteAnimationButton;
+
+    /* advanced play */
+    int8_t advancedPlay;
+    int32_t advancedFrame;
+    clock_t timeOfLastAdvancedFrame;
 } stickAnimator_t;
 
 stickAnimator_t self;
@@ -220,6 +225,9 @@ void init() {
     self.animationBarY = 113;
     self.animationScroll = 0;
     self.animationScrollbar = scrollbarInit(&self.animationScroll, TT_SCROLLBAR_VERTICAL, (self.animationBarX) - 5, (self.animationBarY - 175) / 2, 6, 286, 90);
+
+    self.advancedPlay = 0;
+    self.advancedFrame = 0;
 }
 
 /* create stick in default position */
@@ -328,6 +336,50 @@ void loadCurrentAnimation(int32_t animationIndex) {
         list_append(constructedList, self.animations -> data[animationIndex].r -> data[8 + i].r -> data[11], 'd');
         list_append(constructedList, self.animations -> data[animationIndex].r -> data[8 + i].r -> data[12], 'd');
         list_append(self.currentAnimation, (unitype) constructedList, 'r');
+    }
+}
+
+/* put stick in first frame position */
+void loadFirstFrame(int32_t stickIndex, int32_t animationIndex) {
+    list_t *stick = self.sticks -> data[stickIndex].r;
+    list_t *animation = self.animations -> data[animationIndex].r;
+    if (animation -> data[8].r -> length > 0) {
+        list_t *animationFirstFrame = animation -> data[8].r;
+        stick -> data[STICK_X].d = animation -> data[3].d + animationFirstFrame -> data[0].d;
+        stick -> data[STICK_Y].d = animation -> data[4].d + animationFirstFrame -> data[1].d;
+        stick -> data[STICK_LOWER_BODY] = animationFirstFrame -> data[2];
+        stick -> data[STICK_UPPER_BODY] = animationFirstFrame -> data[3];
+        stick -> data[STICK_HEAD] = animationFirstFrame -> data[4];
+        stick -> data[STICK_LEFT_UPPER_ARM] = animationFirstFrame -> data[5];
+        stick -> data[STICK_LEFT_LOWER_ARM] = animationFirstFrame -> data[6];
+        stick -> data[STICK_RIGHT_UPPER_ARM] = animationFirstFrame -> data[7];
+        stick -> data[STICK_RIGHT_LOWER_ARM] = animationFirstFrame -> data[8];
+        stick -> data[STICK_LEFT_UPPER_LEG] = animationFirstFrame -> data[9];
+        stick -> data[STICK_LEFT_LOWER_LEG] = animationFirstFrame -> data[10];
+        stick -> data[STICK_RIGHT_UPPER_LEG] = animationFirstFrame -> data[11];
+        stick -> data[STICK_RIGHT_LOWER_LEG] = animationFirstFrame -> data[12];
+    }
+}
+
+/* put stick in next frame position */
+void loadNextFrame(int32_t stickIndex, int32_t animationIndex) {
+    list_t *stick = self.sticks -> data[stickIndex].r;
+    list_t *animation = self.animations -> data[animationIndex].r;
+    if (animation -> data[8 + self.advancedFrame].r -> length > 0) {
+        list_t *animationFirstFrame = animation -> data[8 + self.advancedFrame].r;
+        stick -> data[STICK_X].d += animationFirstFrame -> data[0].d;
+        stick -> data[STICK_Y].d += animationFirstFrame -> data[1].d;
+        stick -> data[STICK_LOWER_BODY] = animationFirstFrame -> data[2];
+        stick -> data[STICK_UPPER_BODY] = animationFirstFrame -> data[3];
+        stick -> data[STICK_HEAD] = animationFirstFrame -> data[4];
+        stick -> data[STICK_LEFT_UPPER_ARM] = animationFirstFrame -> data[5];
+        stick -> data[STICK_LEFT_LOWER_ARM] = animationFirstFrame -> data[6];
+        stick -> data[STICK_RIGHT_UPPER_ARM] = animationFirstFrame -> data[7];
+        stick -> data[STICK_RIGHT_LOWER_ARM] = animationFirstFrame -> data[8];
+        stick -> data[STICK_LEFT_UPPER_LEG] = animationFirstFrame -> data[9];
+        stick -> data[STICK_LEFT_LOWER_LEG] = animationFirstFrame -> data[10];
+        stick -> data[STICK_RIGHT_UPPER_LEG] = animationFirstFrame -> data[11];
+        stick -> data[STICK_RIGHT_LOWER_LEG] = animationFirstFrame -> data[12];
     }
 }
 
@@ -913,6 +965,33 @@ void mouseTick() {
     } else {
         self.keys[5] = 0;
     }
+    if (turtleKeyPressed(GLFW_KEY_RIGHT)) {
+        if (self.keys[6] == 0) {
+            /* first frame */
+            self.keys[6] = 1;
+            self.advancedPlay = 1;
+            /* setup animation */
+            self.advancedFrame = 0;
+            self.timeOfLastAdvancedFrame = clock();
+            loadFirstFrame(0, 0);
+        } else {
+            /* key held */
+            clock_t timeNow = clock();
+            if ((double) (timeNow - self.timeOfLastAdvancedFrame) / CLOCKS_PER_SEC >= (1.0 / self.animations -> data[0].r -> data[5].i)) {
+                self.timeOfLastAdvancedFrame = timeNow;
+                self.advancedFrame++;
+                if (self.advancedFrame == self.currentAnimation -> length) {
+                    self.advancedFrame = 0;
+                }
+                loadNextFrame(0, 0);
+            }
+        }
+    } else {
+        if (self.keys[6] == 1) {
+            self.advancedPlay = 0;
+        }
+        self.keys[6] = 0;
+    }
 }
 
 void parseRibbonOutput() {
@@ -945,8 +1024,13 @@ void parseRibbonOutput() {
             }
             if (ribbonRender.output[2] == 4) { // Open
                 if (osToolsFileDialogPrompt(0, "") != -1) {
-                    /* save this animation */
-                    generateAnimation(self.animations -> data[self.animationSaveIndex].r -> data[0].s, self.animationSaveIndex);
+                    if (self.animations -> length == 1 && self.currentAnimation -> length == 1 && strcmp(self.animations -> data[0].r -> data[0].s, "null") == 0) {
+                        /* delete animation */
+                        list_delete(self.animations, 0);
+                    } else {
+                        /* save this animation */
+                        generateAnimation(self.animations -> data[self.animationSaveIndex].r -> data[0].s, self.animationSaveIndex);
+                    }
                     /* import animation */
                     if (importAnimation(osToolsFileDialog.selectedFilename) != -1) {
                         self.animationSaveIndex = self.animations -> length - 1;
