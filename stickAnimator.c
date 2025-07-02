@@ -121,6 +121,10 @@ typedef struct {
     tt_switch_t *loopSwitch;
     double framesPerSecond;
     tt_slider_t *framesPerSecondSlider;
+    int8_t deleteFrameButtonPressed;
+    tt_button_t *deleteFrameButton;
+    int8_t deleteAnimationButtonPressed;
+    tt_button_t *deleteAnimationButton;
 } stickAnimator_t;
 
 stickAnimator_t self;
@@ -187,9 +191,13 @@ void init() {
     self.mode = 1;
     self.modeSwitch = switchInit("Mode", &self.mode, -305, 152, 6);
     self.onionNumber = 0;
-    self.onionSlider = sliderInit("Onion", &self.onionNumber, TT_SLIDER_HORIZONTAL, TT_SLIDER_ALIGN_CENTER, -290, 113, 6, 40, 0, 3, 1);
+    self.onionSlider = sliderInit("Onion", &self.onionNumber, TT_SLIDER_HORIZONTAL, TT_SLIDER_ALIGN_CENTER, -286, 100, 6, 40, 0, 3, 1);
     self.frameButtonPressed = 0;
     self.frameButton = buttonInit("Add Frame", &self.frameButtonPressed, -290, 135, 6);
+    self.deleteFrameButtonPressed = 0;
+    self.deleteFrameButton = buttonInit("Delete Frame", &self.deleteFrameButtonPressed, -285.2, 121, 6);
+    self.deleteAnimationButtonPressed = 0;
+    // self.deleteAnimationButton = buttonInit("Delete Animation", &self.deleteAnimationButtonPressed, -278, 82, 6);
     self.currentFrame = 0;
     self.frameBarX = -180;
     self.frameBarY = 160;
@@ -421,7 +429,7 @@ int32_t importAnimation(char *filename) {
             fileData[right] = '\0';
             if (extractionIndex == 0) {
                 /* update filepath */
-                list_append(outputList, (unitype) osToolsFileDialog.selectedFilename, 's');
+                list_append(outputList, (unitype) filename, 's');
             } else if (extractionIndex == 1) {
                 /* string */
                 list_append(outputList, (unitype) (fileData + left), 's');
@@ -458,6 +466,7 @@ void handleUI() {
     if (self.mode) {
         self.onionSlider -> enabled = TT_ELEMENT_ENABLED;
         self.frameButton -> enabled = TT_ELEMENT_ENABLED;
+        self.deleteFrameButton -> enabled = TT_ELEMENT_ENABLED;
         if (self.currentAnimation -> length >= 8) {
             self.frameScrollbar -> enabled = TT_ELEMENT_ENABLED;
             self.frameScrollbar -> barPercentage = 100 / (self.currentAnimation -> length / 7.8);
@@ -471,10 +480,20 @@ void handleUI() {
                 loadCurrentFrame(0);
             }
         }
+        if (self.deleteFrameButtonPressed) {
+            if (self.currentAnimation -> length > 1) {
+                list_delete(self.currentAnimation, self.currentFrame);
+                if (self.currentFrame > 0) {
+                    self.currentFrame--;
+                }
+                loadCurrentFrame(0);
+            }
+        }
     } else {
         self.onionSlider -> enabled = TT_ELEMENT_HIDE;
         self.frameButton -> enabled = TT_ELEMENT_HIDE;
         self.frameScrollbar -> enabled = TT_ELEMENT_HIDE;
+        self.deleteFrameButton -> enabled = TT_ELEMENT_HIDE;
     }
     if (self.animations -> length >= 8) {
         self.animationScrollbar -> enabled = TT_ELEMENT_ENABLED;
@@ -484,8 +503,10 @@ void handleUI() {
     }
     if (self.playButtonPressed) {
         self.play = !self.play;
-        self.currentFrame = 0;
-        self.timeOfLastFrame = clock();
+        if (self.play) {
+            self.currentFrame = 0;
+            self.timeOfLastFrame = clock();
+        }
     }
     if (self.play) {
         strcpy(self.playButton -> label, "Stop");
@@ -1050,7 +1071,7 @@ int main(int argc, char *argv[]) {
         tt_setColor(TT_COLOR_TEXT);
         turtleTextWriteStringf(-310, -170, 5, 0, "%.2lf, %.2lf", turtle.mouseX, turtle.mouseY);
         renderGround();
-        // renderStick(self.sticks -> data[0].r);
+        renderStick(self.sticks -> data[0].r);
         renderAnimations();
         if (self.mode) {
             renderDots(0);
