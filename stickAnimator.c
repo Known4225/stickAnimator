@@ -5,9 +5,12 @@
 /*
 TODO:
 - sync currentAnimation and currentFrame names so that it makes more sense
-- organise scripts and levels of heirarchy in code
 - face the music and admit that you cannot support multiple sticks
-- play animations
+- delete frames
+- delete animations
+- reorder frames?
+- rotate entire stick?
+- fix bug with loading causing an extra frame (or erasing the last frame?)
 - binding keys to animations?
 */
 
