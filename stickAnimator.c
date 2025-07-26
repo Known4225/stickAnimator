@@ -83,6 +83,8 @@ typedef struct {
     list_t *limbParents;
     list_t *limbChildren;
     int8_t keys[16];
+    double gridSize;
+    double gridBounds[4];
 
     int32_t mouseStickIndex;
     int32_t mouseHoverDot;
@@ -196,6 +198,19 @@ void init() {
     self.mouseHoverAnimation = -1;
 
     /* UI elements */
+    self.gridSize = 8;
+    double startX = -320;
+    double endX = 250;
+    double startY = -180;
+    double endY = 88;
+    endX = startX + self.gridSize * floor((endX - startX) / self.gridSize);
+    endY = startY + self.gridSize * floor((endY - startY) / self.gridSize);
+    self.gridBounds[0] = startX;
+    self.gridBounds[1] = startY;
+    self.gridBounds[2] = endX;
+    self.gridBounds[3] = endY;
+
+    
     self.mode = 1;
     self.modeSwitch = switchInit("Mode", &self.mode, -305, 152, 6);
     self.onionNumber = 0;
@@ -588,6 +603,24 @@ void handleUI() {
     }
 }
 
+/* render grid */
+void renderGrid() {
+    turtlePenColorAlpha(120, 120, 120, 220);
+    turtlePenSize(1);
+    for (int32_t i = 0; i < (self.gridBounds[2] - self.gridBounds[0]) / self.gridSize + 1; i++) {
+        turtleGoto(self.gridBounds[0] + self.gridSize * i, self.gridBounds[1]);
+        turtlePenDown();
+        turtleGoto(self.gridBounds[0] + self.gridSize * i, self.gridBounds[3]);
+        turtlePenUp();
+    }
+    for (int32_t i = 0; i < (self.gridBounds[3] - self.gridBounds[1]) / self.gridSize + 1; i++) {
+        turtleGoto(self.gridBounds[0], self.gridBounds[1] + self.gridSize * i);
+        turtlePenDown();
+        turtleGoto(self.gridBounds[2], self.gridBounds[1] + self.gridSize * i);
+        turtlePenUp();
+    }
+}
+
 /* render the ground */
 void renderGround() {
     turtlePenShape("square");
@@ -660,6 +693,38 @@ void renderStick(list_t *stick) {
         turtleGoto(savedX + sin(stick -> data[STICK_HEAD].d / 57.2958) * STICK_SIZE_HEAD * stick -> data[STICK_SIZE].d, savedY + cos(stick -> data[STICK_HEAD].d / 57.2958) * STICK_SIZE_HEAD * stick -> data[STICK_SIZE].d);
         turtlePenDown();
         turtlePenUp();
+    }
+}
+
+void renderOnions() {
+    /* draw stick */
+    for (int32_t i = self.currentFrame - self.onionNumber; i < self.currentFrame; i++) {
+        if (i < 0) {
+            continue;
+        }
+        if (i >= self.currentAnimation -> length) {
+            return;
+        }
+        list_t *tempStick = list_init();
+        createStick(tempStick);
+        tempStick -> data[STICK_SIZE].d = 0.5;
+        tempStick -> data[STICK_X].d = self.currentAnimation -> data[i].r -> data[0].d;
+        tempStick -> data[STICK_Y].d = self.currentAnimation -> data[i].r -> data[1].d;
+        tempStick -> data[STICK_LOWER_BODY].d = self.currentAnimation -> data[i].r -> data[2].d;
+        tempStick -> data[STICK_UPPER_BODY].d = self.currentAnimation -> data[i].r -> data[3].d;
+        tempStick -> data[STICK_HEAD].d = self.currentAnimation -> data[i].r -> data[4].d;
+        tempStick -> data[STICK_LEFT_UPPER_ARM].d = self.currentAnimation -> data[i].r -> data[5].d;
+        tempStick -> data[STICK_LEFT_LOWER_ARM].d = self.currentAnimation -> data[i].r -> data[6].d;
+        tempStick -> data[STICK_RIGHT_UPPER_ARM].d = self.currentAnimation -> data[i].r -> data[7].d;
+        tempStick -> data[STICK_RIGHT_LOWER_ARM].d = self.currentAnimation -> data[i].r -> data[8].d;
+        tempStick -> data[STICK_LEFT_UPPER_LEG].d = self.currentAnimation -> data[i].r -> data[9].d;
+        tempStick -> data[STICK_LEFT_LOWER_LEG].d = self.currentAnimation -> data[i].r -> data[10].d;
+        tempStick -> data[STICK_RIGHT_UPPER_LEG].d = self.currentAnimation -> data[i].r -> data[11].d;
+        tempStick -> data[STICK_RIGHT_LOWER_LEG].d = self.currentAnimation -> data[i].r -> data[12].d;
+
+        tempStick -> data[STICK_ALPHA].d = 200.0;
+        renderStick(tempStick);
+        list_free(tempStick);
     }
 }
 
@@ -905,8 +970,13 @@ void mouseTick() {
             if (self.mouseDraggingDot != -1) {
                 if (self.mouseDraggingDot == 0) {
                     /* move position */
-                    self.sticks -> data[self.mouseStickIndex].r -> data[0].d = (turtle.mouseX - self.mouseAnchorX) + self.positionAnchorX;
-                    self.sticks -> data[self.mouseStickIndex].r -> data[1].d = (turtle.mouseY - self.mouseAnchorY) + self.positionAnchorY;
+                    if (turtleKeyPressed(GLFW_KEY_LEFT_SHIFT)) {
+                        self.sticks -> data[self.mouseStickIndex].r -> data[0].d = (turtle.mouseX - self.mouseAnchorX) + self.positionAnchorX;
+                        self.sticks -> data[self.mouseStickIndex].r -> data[1].d = (turtle.mouseY - self.mouseAnchorY) + self.positionAnchorY;
+                    } else {
+                        self.sticks -> data[self.mouseStickIndex].r -> data[0].d = round(((turtle.mouseX - self.mouseAnchorX) + self.positionAnchorX - self.gridBounds[0]) / self.gridSize) * self.gridSize + self.gridBounds[0];
+                        self.sticks -> data[self.mouseStickIndex].r -> data[1].d = round(((turtle.mouseY - self.mouseAnchorY) + self.positionAnchorY - self.gridBounds[1]) / self.gridSize) * self.gridSize + self.gridBounds[1];
+                    }
                 } else {
                     /* change angle */
                     double lastAngle = self.sticks -> data[self.mouseStickIndex].r -> data[self.mouseDraggingDot].d;
@@ -968,7 +1038,7 @@ void mouseTick() {
     } else {
         self.keys[5] = 0;
     }
-    if (turtleKeyPressed(GLFW_KEY_RIGHT)) {
+    if (turtleKeyPressed(GLFW_KEY_SPACE)) {
         if (self.keys[6] == 0) {
             /* first frame */
             self.keys[6] = 1;
@@ -1157,7 +1227,9 @@ int main(int argc, char *argv[]) {
         turtleClear();
         tt_setColor(TT_COLOR_TEXT);
         turtleTextWriteStringf(-310, -170, 5, 0, "%.2lf, %.2lf", turtle.mouseX, turtle.mouseY);
+        renderGrid();
         renderGround();
+        renderOnions();
         renderStick(self.sticks -> data[0].r);
         renderAnimations();
         if (self.mode) {
